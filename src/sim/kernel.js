@@ -103,6 +103,11 @@ export class Lattice {
     this.rhoRef = 1;
     this.steps = 0;
     this.smagorinsky = 0.17;
+    this.noSlipFloor = false; // false: moving-belt (free-slip) ground
+    this.turbulence = 0; // inlet turbulence intensity (rms / U)
+    this._bw = Math.ceil(ny / 6) + 1;
+    this._bd = Math.ceil(nz / 6) + 1;
+    this._noise = new Float32Array(this._bw * this._bd * 3);
     this._step = generateStep(nx, ny, nz);
   }
 
@@ -250,6 +255,34 @@ export class Lattice {
           G[b + nx - 1] = G[b + nx - 2];
         }
     }
+    // Free-stream turbulence: slowly evolving random gusts (an Ornstein-
+    // Uhlenbeck process per 6-cell patch) superimposed on the inlet.
+    if (this.turbulence > 0 && U > 1e-4) {
+      const noise = this._noise;
+      const theta = Math.min(0.5, U / 6);
+      const kick = this.turbulence * U * Math.sqrt(2 * theta) * 1.732;
+      for (let k = 0; k < noise.length; k++) noise[k] += -noise[k] * theta + kick * (Math.random() * 2 - 1);
+      // Bilinear blend between patches keeps the gusts smooth in space, and
+      // the streamwise part is kept small so the inlet stays quiet acoustically.
+      const bw = this._bw, bd = this._bd;
+      for (let z = 1; z < nz - 1; z++) {
+        const fz = Math.min(bd - 1.001, z / 6), z0 = fz | 0, tz = fz - z0;
+        for (let y = 1; y < ny - 1; y++) {
+          const fy = Math.min(bw - 1.001, y / 6), y0 = fy | 0, ty = fy - y0;
+          const p00 = (y0 + z0 * bw) * 3, p10 = p00 + 3, p01 = p00 + bw * 3, p11 = p01 + 3;
+          const w00 = (1 - ty) * (1 - tz), w10 = ty * (1 - tz), w01 = (1 - ty) * tz, w11 = ty * tz;
+          const ux = U + 0.3 * (noise[p00] * w00 + noise[p10] * w10 + noise[p01] * w01 + noise[p11] * w11);
+          const uy = 1.35 * (noise[p00 + 1] * w00 + noise[p10 + 1] * w10 + noise[p01 + 1] * w01 + noise[p11 + 1] * w11);
+          const uz = 1.35 * (noise[p00 + 2] * w00 + noise[p10 + 2] * w10 + noise[p01 + 2] * w01 + noise[p11 + 2] * w11);
+          const u15 = 1 - 1.5 * (ux * ux + uy * uy + uz * uz);
+          const b = y * nx + z * nxy;
+          for (let i = 0; i < Q; i++) {
+            const cu = 3 * (CX[i] * ux + CY[i] * uy + CZ[i] * uz);
+            G[i * N + b] = W[i] * (u15 + cu + 0.5 * cu * cu);
+          }
+        }
+      }
+    }
     // Free-slip floor / ceiling.
     for (let i = 0; i < Q; i++) {
       const o = i * N;
@@ -261,6 +294,18 @@ export class Lattice {
           const b = x + zb;
           G[o + b] = G[m + b + nx];
           G[o + b + top] = G[m + b + top - nx];
+        }
+      }
+    }
+    // Optional stationary floor: no-slip (bounce-back) instead of the belt.
+    if (this.noSlipFloor) {
+      for (let i = 1; i < Q; i++) {
+        if (CY[i] <= 0) continue;
+        const o = i * N;
+        const m = OPP[i] * N + nx + CX[i] + CZ[i] * nxy;
+        for (let z = 1; z < nz - 1; z++) {
+          const zb = z * nxy;
+          for (let x = 1; x < nx - 1; x++) G[o + x + zb] = G[m + x + zb];
         }
       }
     }

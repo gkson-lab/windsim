@@ -5,7 +5,7 @@ import { Lattice } from './kernel.js';
 let lat = null;
 let gen = 0;
 let hasGeometry = false;
-const params = { U: 0.06, tau0: 0.503, fanK: 0, running: true };
+const params = { U: 0.06, tau0: 0.503, fanK: 0, running: true, noSlipFloor: false, turbulence: 0 };
 let uCur = 0;
 
 let pool = [];
@@ -62,6 +62,8 @@ function loop() {
   const t0 = performance.now();
   do {
     uCur += (params.U - uCur) * 0.004;
+    lat.noSlipFloor = params.noSlipFloor;
+    lat.turbulence = params.turbulence;
     lat.step(uCur, params.tau0, params.fanK);
     forceSum[0] += lat.force[0];
     forceSum[1] += lat.force[1];

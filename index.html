@@ -54,6 +54,16 @@
           <input id="speed" type="range" min="0" max="400" step="1" /></label>
         <label class="row" id="fanRow"><span>Fan power</span><output id="oFan"></output>
           <input id="fan" type="range" min="0" max="150" step="1" value="100" /></label>
+        <label class="row"><span>Air temperature</span><output id="oTemp"></output>
+          <input id="temp" type="range" min="-30" max="50" step="1" value="15" /></label>
+        <label class="row"><span>Altitude</span><output id="oAlt"></output>
+          <input id="altitude" type="range" min="0" max="5000" step="50" value="0" /></label>
+        <label class="row"><span>Inlet turbulence</span><output id="oTurb"></output>
+          <input id="turbulence" type="range" min="0" max="20" step="1" value="0" /></label>
+        <div class="seg" id="segGround" role="group" aria-label="Ground">
+          <button data-v="belt" class="on">Moving ground</button><button data-v="fixed">Fixed floor</button>
+        </div>
+        <p class="note warn" id="machWarn" hidden>Above Mach 0.3 real air compresses; this solver is incompressible, so treat forces as approximate.</p>
       </section>
 
       <section>
@@ -99,6 +109,33 @@
       </section>
 
       <section>
+        <h2>Data</h2>
+        <dl class="data">
+          <dt>Side-force coefficient</dt><dd id="dCs">—</dd>
+          <dt>Drag area C<sub>d</sub>A</dt><dd id="dCdA">—</dd>
+          <dt>Side force</dt><dd id="dSide">—</dd>
+          <dt>Dynamic pressure</dt><dd id="dQ">—</dd>
+          <dt>Mach number</dt><dd id="dMach">—</dd>
+          <dt>Frontal area</dt><dd id="dArea">—</dd>
+          <dt>Tunnel blockage</dt><dd id="dBlock">—</dd>
+          <dt>Peak air speed</dt><dd id="dPeak">—</dd>
+          <dt>Highest surface pressure</dt><dd id="dCpMax">—</dd>
+          <dt>Strongest suction</dt><dd id="dCpMin">—</dd>
+          <dt>Wake shedding</dt><dd id="dShed">—</dd>
+          <dt>Air density</dt><dd id="dRho">—</dd>
+          <dt>Kinematic viscosity</dt><dd id="dNu">—</dd>
+          <dt>Flow time simulated</dt><dd id="dTime">—</dd>
+          <dt>Real-world reference</dt><dd id="dRef">—</dd>
+        </dl>
+        <dl class="data" id="fanData" hidden>
+          <dt>Fan airflow <em id="dFanN"></em></dt><dd id="dFan">—</dd>
+          <dt>Versus unobstructed</dt><dd id="dFanEff">—</dd>
+        </dl>
+        <button class="btn wide" id="btnCsv">⤓ Export force history (CSV)</button>
+        <p class="note">Hover the cut plane to probe local speed and pressure.</p>
+      </section>
+
+      <section>
         <h2>Solver</h2>
         <div class="seg" id="segQuality" role="group" aria-label="Grid resolution">
           <button data-v="32">Draft</button><button data-v="48" class="on">Standard</button><button data-v="64">Fine</button><button data-v="80">Ultra</button>
@@ -112,6 +149,7 @@
       <div class="stat"><label id="lLift">Lift coefficient</label><b id="sCl">—</b><small>C<sub>l</sub></small></div>
       <div class="stat"><label>Drag force</label><b id="sDrag">—</b><small id="uDrag">N</small></div>
       <div class="stat"><label id="lLiftF">Lift</label><b id="sLift">—</b><small id="uLift">N</small></div>
+      <div class="stat"><label>Drag power</label><b id="sPower">—</b><small id="uPower">W</small></div>
       <div class="stat"><label>Reynolds number</label><b id="sRe">—</b><small id="sReSim"></small></div>
       <div class="stat wide">
         <label>Force history <i class="k cd"></i>C<sub>d</sub> <i class="k cl"></i>C<sub>l</sub></label>
@@ -126,6 +164,7 @@
       <div class="ticks"><span id="legendMin"></span><span id="legendMid"></span><span id="legendMax"></span></div>
     </div>
 
+    <div class="probe glass" id="probe" hidden></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div class="dropveil" id="dropveil"><div>Drop to load into the tunnel</div></div>
 

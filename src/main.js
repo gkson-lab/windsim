@@ -11,8 +11,9 @@ import { lutCss } from './viz/colormaps.js';
 import { loadModelFiles, ACCEPT } from './loaders.js';
 
 const $ = (id) => document.getElementById(id);
-const AIR_DENSITY = 1.225; // kg/m³
-const AIR_NU = 1.5e-5; // m²/s
+const FAN_G0 = 0.0012; // lattice body force of a fan at 100 %
+const FAN_U0 = 0.026; // free-air face speed that force produces (lattice units)
+const FAN_FREE_MS = 2.5; // ...which stands for a typical 120 mm case fan (≈ 60 CFM)
 const U_LATTICE = 0.06; // free-stream speed in lattice units
 const NU_MIN = 0.001; // lowest stable lattice viscosity (LES handles the rest)
 const DEFAULT_FIT = [1.55, 0.85, 0.85];
@@ -36,6 +37,10 @@ const state = {
   slicePos: 0.5,
   ny: 48,
   running: true,
+  temp: 15, // °C
+  altitude: 0, // m
+  turbulence: 0, // inlet turbulence intensity, %
+  ground: 'belt', // 'belt' (moving ground) | 'fixed' (no-slip floor)
 };
 
 /* ───────────────────────────── renderer & scene ───────────────────────────── */
@@ -177,7 +182,7 @@ function buildTunnel() {
 /* ───────────────────────────── solver worker ───────────────────────────── */
 
 const worker = new Worker(new URL('./sim/worker.js', import.meta.url), { type: 'module' });
-const smooth = { cd: null, cl: null, sps: 0 };
+const smooth = { cd: null, cl: null, cs: null, sps: 0 };
 const history = { cd: [], cl: [] };
 let lastHistory = 0;
 
@@ -192,9 +197,24 @@ function setGrid(ny) {
   $('gridNote').textContent = `${grid.nx} × ${grid.ny} × ${grid.nz} lattice · ${(cells / 1000).toFixed(0)}k cells · D3Q19 LBM + LES`;
 }
 
+/** Air properties from temperature and altitude (ISA pressure, Sutherland viscosity). */
+function air() {
+  const T = state.temp + 273.15;
+  const p = 101325 * Math.pow(1 - 2.25577e-5 * state.altitude, 5.25588);
+  const rho = p / (287.05 * T);
+  const mu = (1.716e-5 * Math.pow(T / 273.15, 1.5) * (273.15 + 110.4)) / (T + 110.4);
+  return { rho, mu, nu: mu / rho, a: Math.sqrt(1.4 * 287.05 * T), p };
+}
+
 function uScale() {
   if (state.speed > 0) return Math.max(0.012, flowParams().U);
-  return hasFans ? 0.035 : U_LATTICE;
+  return hasFans ? FAN_U0 * 1.3 * Math.max(0.3, state.fan) : U_LATTICE;
+}
+
+/** Metres per second represented by one lattice velocity unit. */
+function velScale() {
+  if (state.speed > 0) return state.speed / 3.6 / flowParams().U;
+  return FAN_FREE_MS / FAN_U0;
 }
 
 function metresPerWorld() {
@@ -204,24 +224,30 @@ function metresPerWorld() {
 function flowParams() {
   const U = U_LATTICE * Math.min(1, state.speed / 12);
   const lengthM = Math.max(1, solid.length) * grid.h * metresPerWorld();
-  const reReal = ((state.speed / 3.6) * lengthM) / AIR_NU;
+  const reReal = ((state.speed / 3.6) * lengthM) / air().nu;
   const nu = reReal > 0 ? THREE.MathUtils.clamp((U * Math.max(1, solid.length)) / reReal, NU_MIN, 0.05) : 0.004;
   return { U, tau0: 0.5 + 3 * nu, nu, reReal, reSim: (U * Math.max(1, solid.length)) / nu };
 }
 
 function pushParams() {
   const p = flowParams();
+  // Fan force is set so its free-air face speed is FAN_FREE_MS × power in real
+  // units: in a 200 km/h gale a case fan barely registers, as it should.
+  const face = (state.fan * FAN_FREE_MS) / velScale();
+  const fanK = hasFans ? Math.min(0.004, FAN_G0 * (face / FAN_U0) ** 2) : 0;
   worker.postMessage({
     type: 'params',
-    params: { U: p.U, tau0: p.tau0, fanK: hasFans ? state.fan * 0.0012 : 0, running: state.running },
+    params: { U: p.U, tau0: p.tau0, fanK, running: state.running, noSlipFloor: state.ground === 'fixed', turbulence: state.turbulence / 100 },
   });
   streaks.speed = state.speed > 0 ? 0.55 + 0.75 * Math.sqrt(Math.min(1, state.speed / 300)) : 0.8;
   streaks.material.uniforms.speedFade.value = state.speed > 0 ? 0 : 1;
   $('sRe').textContent = p.reReal > 0 ? fmtSci(p.reReal) : '—';
   $('sReSim').textContent = p.reReal > 0 ? `simulated at ${fmtSci(p.reSim)}` : 'fan-driven flow';
+  updateStaticData();
   updateLegend();
 }
 
+let lastScan = 0;
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type !== 'field' || m.gen !== gen) return;
@@ -229,44 +255,98 @@ worker.onmessage = (e) => {
   field.data = m.data;
   field.rhoRef = m.rhoRef;
   field.U = m.U;
+  field.steps = m.steps;
   const us = uScale();
   slice.update(field, us);
   voxelView.update(field, us);
   updateTelemetry(m);
+  const now = performance.now();
+  if (now - lastScan > 450) {
+    lastScan = now;
+    scanField();
+  }
 };
 
+const fmt = (v, d = 2) => (Number.isFinite(v) ? (Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 100 ? v.toFixed(Math.max(0, d - 2)) : Math.abs(v) >= 10 ? v.toFixed(Math.max(0, d - 1)) : v.toFixed(d)) : '—');
+const fmtForce = (n) => {
+  const a = Math.abs(n);
+  return a >= 1000 ? `${fmt(n / 1000)} kN` : a >= 1 ? `${fmt(n)} N` : `${fmt(n * 1000)} mN`;
+};
+const fmtPa = (p) => (Math.abs(p) >= 1000 ? `${fmt(p / 1000)} kPa` : `${fmt(p, 1)} Pa`);
+
+/** Frontal area (m²) and free-stream dynamic pressure (Pa) in real units. */
+function realRef() {
+  const mpw = metresPerWorld();
+  const v = state.speed / 3.6;
+  const area = solid.area * grid.h * grid.h * mpw * mpw;
+  return { v, area, q: 0.5 * air().rho * v * v, mpw };
+}
+
+/** Seconds of real time one solver step represents. */
+const stepSeconds = () => (grid.h * metresPerWorld()) / velScale();
+
+function updateStaticData() {
+  const A = air();
+  const { v, area, q } = realRef();
+  $('dQ').textContent = v > 0 ? fmtPa(q) : '—';
+  $('dMach').textContent = v > 0 ? (v / A.a).toFixed(3) : '—';
+  $('dArea').textContent = area >= 0.01 ? `${fmt(area)} m²` : `${fmt(area * 1e4, 1)} cm²`;
+  $('dBlock').textContent = `${((solid.area / ((grid.ny - 2) * (grid.nz - 2))) * 100).toFixed(1)} %`;
+  $('dRho').textContent = `${A.rho.toFixed(3)} kg/m³`;
+  $('dNu').textContent = `${(A.nu * 1e5).toFixed(2)}×10⁻⁵ m²/s`;
+  $('dRef').textContent = state.preset?.ref ?? '—';
+  $('machWarn').hidden = !(v / A.a > 0.3);
+}
+
+const clTrace = [];
 function updateTelemetry(m) {
   smooth.sps += (m.sps - smooth.sps) * 0.2;
   $('sSps').textContent = smooth.sps > 0 ? smooth.sps.toFixed(0) : '—';
+  const t = m.steps * stepSeconds();
+  $('dTime').textContent = t >= 1 ? `${fmt(t)} s` : `${fmt(t * 1000, 1)} ms`;
   const windy = state.speed > 0 && m.U > 0.004 && solid.area > 0;
   if (!windy) {
-    for (const id of ['sCd', 'sCl', 'sDrag', 'sLift']) $(id).textContent = '—';
+    for (const id of ['sCd', 'sCl', 'sDrag', 'sLift', 'sPower', 'dCs', 'dCdA', 'dSide']) $(id).textContent = '—';
     return;
   }
-  const q = 0.5 * m.U * m.U * solid.area;
-  const cd = m.force[0] / q;
-  const cl = m.force[1] / q;
+  // Solid-blockage correction: the body squeezes the stream, so the air
+  // passing it is faster than the nominal tunnel speed.
+  const blockage = solid.area / ((grid.ny - 2) * (grid.nz - 2));
+  const qL = (0.5 * m.U * m.U * solid.area) / (1 - blockage) ** 2;
+  const cd = m.force[0] / qL;
+  const cl = m.force[1] / qL;
+  const cs = m.force[2] / qL;
   if (!Number.isFinite(cd) || !Number.isFinite(cl)) return;
   // The impulsive start sends pressure waves through the tunnel; wait for
   // them to wash out before trusting the balance.
   if (m.steps < settleSteps()) {
-    $('sCd').textContent = $('sCl').textContent = '…';
-    $('sDrag').textContent = $('sLift').textContent = '…';
-    smooth.cd = smooth.cl = null;
+    for (const id of ['sCd', 'sCl', 'sDrag', 'sLift', 'sPower']) $(id).textContent = '…';
+    smooth.cd = smooth.cl = smooth.cs = null;
+    clTrace.length = 0;
     return;
   }
-  smooth.cd = smooth.cd === null ? cd : smooth.cd + (cd - smooth.cd) * 0.06;
-  smooth.cl = smooth.cl === null ? cl : smooth.cl + (cl - smooth.cl) * 0.06;
+  const mix = (old, v) => (old === null || old === undefined ? v : old + (v - old) * 0.06);
+  smooth.cd = mix(smooth.cd, cd);
+  smooth.cl = mix(smooth.cl, cl);
+  smooth.cs = mix(smooth.cs, cs);
+  clTrace.push(m.steps, cl);
+  if (clTrace.length > 1200) clTrace.splice(0, 2);
 
-  const v = state.speed / 3.6;
-  const mpw = metresPerWorld();
-  const areaM2 = solid.area * grid.h * grid.h * mpw * mpw;
-  const qReal = 0.5 * AIR_DENSITY * v * v * areaM2;
+  const { v, area, q } = realRef();
+  const drag = smooth.cd * q * area;
+  const lift = smooth.cl * q * area;
+  const side = smooth.cs * q * area;
   $('sCd').textContent = smooth.cd.toFixed(2);
   $('sCl').textContent = smooth.cl.toFixed(2);
-  setForce('sDrag', 'uDrag', smooth.cd * qReal);
-  setForce('sLift', 'uLift', Math.abs(smooth.cl * qReal));
+  setForce('sDrag', 'uDrag', drag);
+  setForce('sLift', 'uLift', Math.abs(lift));
   $('lLiftF').textContent = smooth.cl < 0 ? 'Downforce' : 'Lift';
+  const watts = drag * v;
+  $('sPower').textContent = Math.abs(watts) >= 1000 ? fmt(watts / 1000) : fmt(watts, 1);
+  $('uPower').textContent = Math.abs(watts) >= 1000 ? `kW · ${fmt(watts / 745.7, 1)} hp` : 'W';
+  $('dCs').textContent = smooth.cs.toFixed(3);
+  $('dCdA').textContent = `${fmt(smooth.cd * area, 3)} m²`;
+  $('dSide').textContent = fmtForce(side);
 
   const now = performance.now();
   if (now - lastHistory > 90) {
@@ -277,8 +357,144 @@ function updateTelemetry(m) {
       history.cd.shift();
       history.cl.shift();
     }
+    if (log.length < 20000) log.push([t, m.steps, smooth.cd, smooth.cl, smooth.cs, drag, lift, side]);
     drawSpark();
   }
+}
+
+/* Periodic pass over the whole field for extremes, surface loads and fan flow. */
+let surfaceProbe = new Int32Array(0);
+let fans = [];
+const log = [];
+
+function buildSurfaceProbe() {
+  const { nx, ny, nz } = grid;
+  const f = field.flag;
+  const nxy = nx * ny;
+  const out = [];
+  for (let z = 1; z < nz - 1; z++)
+    for (let y = 1; y < ny - 1; y++)
+      for (let x = 1; x < nx - 1; x++) {
+        const c = x + nx * (y + ny * z);
+        if (f[c] === 1) continue;
+        if (f[c + 1] === 1 || f[c - 1] === 1 || f[c + nx] === 1 || f[c - nx] === 1 || f[c + nxy] === 1 || f[c - nxy] === 1) out.push(c);
+      }
+  surfaceProbe = Int32Array.from(out);
+}
+
+function scanField() {
+  if (!field.ready) return;
+  const { N, data, flag } = field;
+  const C = velScale();
+  const A = air();
+  let peak = 0;
+  for (let c = 0; c < N; c++) {
+    if (flag[c] === 1) continue;
+    const s = data[c] * data[c] + data[N + c] * data[N + c] + data[2 * N + c] * data[2 * N + c];
+    if (s > peak) peak = s;
+  }
+  const peakMs = Math.sqrt(peak) * C;
+  $('dPeak').textContent = `${fmt(peakMs, 1)} m/s · ${fmt(peakMs * 3.6, 1)} km/h`;
+
+  // Surface pressure extremes (gauge), with Cp when there is a free stream.
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let k = 0; k < surfaceProbe.length; k++) {
+    const r = data[3 * N + surfaceProbe[k]];
+    if (r < lo) lo = r;
+    if (r > hi) hi = r;
+  }
+  const settled = (field.steps ?? 0) >= settleSteps();
+  if (surfaceProbe.length && settled) {
+    const toPa = (r) => ((r - field.rhoRef) / 3) * A.rho * C * C;
+    const q = realRef().q;
+    const cp = (r) => (state.speed > 0 && q > 0 ? ` (Cp ${(toPa(r) / q).toFixed(2)})` : '');
+    $('dCpMax').textContent = `${fmtPa(toPa(hi))}${cp(hi)}`;
+    $('dCpMin').textContent = `${fmtPa(toPa(lo))}${cp(lo)}`;
+  } else $('dCpMax').textContent = $('dCpMin').textContent = settled ? '—' : '…';
+
+  // Fan throughput: mean face velocity × swept area.
+  $('fanData').hidden = !fans.length;
+  if (fans.length) {
+    const mpw = metresPerWorld();
+    let total = 0;
+    let free = 0;
+    for (const f of fans) {
+      let un = 0;
+      for (const c of f.cells) un += data[c] * f.dir[0] + data[N + c] * f.dir[1] + data[2 * N + c] * f.dir[2];
+      const areaM2 = f.area * mpw * mpw;
+      total += Math.abs(un / f.cells.length) * C * areaM2;
+      free += FAN_FREE_MS * state.fan * f.strength ** 0.5 * areaM2;
+    }
+    const m3h = total * 3600;
+    $('dFan').textContent = `${fmt(m3h, 1)} m³/h · ${fmt(m3h / 1.699, 1)} CFM`;
+    $('dFanN').textContent = `(sum of ${fans.length})`;
+    $('dFanEff').textContent = free > 0 && state.speed === 0 ? `${Math.round((total / free) * 100)} % of free-air rating` : '—';
+  }
+
+  // Vortex-shedding frequency from the lift trace (upward mean crossings).
+  let shed = '—';
+  const n = clTrace.length / 2;
+  if (n > 80 && state.speed > 0) {
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += clTrace[i * 2 + 1] / n;
+    let sd = 0;
+    for (let i = 0; i < n; i++) sd += (clTrace[i * 2 + 1] - mean) ** 2 / n;
+    sd = Math.sqrt(sd);
+    const cross = [];
+    let below = false;
+    for (let i = 0; i < n; i++) {
+      const d = clTrace[i * 2 + 1] - mean;
+      if (d < -0.3 * sd) below = true;
+      else if (below && d > 0.3 * sd) {
+        cross.push(clTrace[i * 2]);
+        below = false;
+      }
+    }
+    // Only report a frequency when the oscillation is strong and regular.
+    const gaps = cross.slice(1).map((c, i) => c - cross[i]);
+    const gMean = gaps.reduce((a, b) => a + b, 0) / Math.max(1, gaps.length);
+    const gSd = Math.sqrt(gaps.reduce((a, b) => a + (b - gMean) ** 2, 0) / Math.max(1, gaps.length));
+    if (sd > 0.03 && cross.length >= 5 && gSd / gMean < 0.25) {
+      const period = gMean * stepSeconds();
+      const f = 1 / period;
+      const D = (model.bbox.max.y - model.bbox.min.y) * metresPerWorld();
+      shed = `${f >= 100 ? f.toFixed(0) : f.toFixed(1)} Hz · St ${((f * D) / (state.speed / 3.6)).toFixed(2)}`;
+    }
+  }
+  $('dShed').textContent = shed;
+}
+
+function exportCsv() {
+  const A = air();
+  const p = flowParams();
+  const head = [
+    `# Zephyr wind tunnel export`,
+    `# subject,${state.preset?.name ?? ''}`,
+    `# wind_speed_kmh,${state.speed}`,
+    `# real_size_m,${state.real}`,
+    `# yaw_deg,${state.yaw}`,
+    `# pitch_deg,${state.pitch}`,
+    `# roll_deg,${state.roll}`,
+    `# air_temperature_C,${state.temp}`,
+    `# altitude_m,${state.altitude}`,
+    `# air_density_kg_m3,${A.rho.toFixed(4)}`,
+    `# inlet_turbulence_pct,${state.turbulence}`,
+    `# ground,${state.ground}`,
+    `# frontal_area_m2,${realRef().area.toPrecision(5)}`,
+    `# reynolds_real,${p.reReal.toExponential(3)}`,
+    `# reynolds_simulated,${p.reSim.toExponential(3)}`,
+    `# lattice,${grid.nx}x${grid.ny}x${grid.nz}`,
+    'time_s,step,cd,cl,cs,drag_N,lift_N,side_N',
+  ];
+  const rows = log.map((r) => r.map((v, i) => (i === 1 ? v : Number(v).toPrecision(6))).join(','));
+  const blob = new Blob([[...head, ...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `zephyr-${state.preset?.id ?? 'run'}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast(rows.length ? `Exported ${rows.length} samples` : 'Exported setup only: no force samples yet');
 }
 
 const settleSteps = () => Math.round(grid.nx * 3.5);
@@ -384,8 +600,9 @@ function setSubject(preset) {
   applyBodyMode();
   syncUi();
   rebuildSubject(true);
-  smooth.cd = smooth.cl = null;
+  smooth.cd = smooth.cl = smooth.cs = null;
   history.cd.length = history.cl.length = 0;
+  log.length = clTrace.length = 0;
   drawSpark();
   $('subjectName').textContent = preset.name;
   $('subjectDesc').textContent = preset.desc ?? '';
@@ -410,6 +627,8 @@ function rebuildSubject(reset = false) {
   field.flag = res.flag;
   solid = measureSolid(res.flag, grid.nx, grid.ny, grid.nz);
   hasFans = res.fanIdx.length > 0;
+  fans = res.fans;
+  buildSurfaceProbe();
   $('fanRow').hidden = !hasFans;
   worker.postMessage({ type: 'geometry', gen, flag: res.flag, fanIdx: res.fanIdx, fanVec: res.fanVec, reset });
   pushParams();
@@ -503,6 +722,10 @@ function bindSeg(id, apply) {
 const ui = {
   speed: bindRange('speed', 'oSpeed', (v) => (v ? `${v} km/h · ${(v / 3.6).toFixed(1)} m/s` : 'still air'), (v) => { state.speed = v; pushParams(); }),
   fan: bindRange('fan', 'oFan', (v) => `${v}%`, (v) => { state.fan = v / 100; pushParams(); }),
+  temp: bindRange('temp', 'oTemp', (v) => `${v} °C`, (v) => { state.temp = v; pushParams(); }),
+  altitude: bindRange('altitude', 'oAlt', (v) => `${v} m`, (v) => { state.altitude = v; pushParams(); }),
+  turbulence: bindRange('turbulence', 'oTurb', (v) => (v ? `${v} %` : 'smooth'), (v) => { state.turbulence = v; pushParams(); }),
+  ground: bindSeg('segGround', (v) => { state.ground = v; pushParams(); }),
   yaw: bindRange('yaw', 'oYaw', (v) => `${v}°`, (v) => { state.yaw = v; scheduleRebuild(); }),
   pitch: bindRange('pitch', 'oPitch', (v) => `${v}°`, (v) => { state.pitch = v; scheduleRebuild(); }),
   roll: bindRange('roll', 'oRoll', (v) => `${v}°`, (v) => { state.roll = v; scheduleRebuild(); }),
@@ -562,6 +785,10 @@ function applySlice() {
 function syncUi() {
   ui.speed.set(state.speed);
   ui.fan.set(Math.round(state.fan * 100));
+  ui.temp.set(state.temp);
+  ui.altitude.set(state.altitude);
+  ui.turbulence.set(state.turbulence);
+  ui.ground.set(state.ground);
   ui.yaw.set(state.yaw);
   ui.pitch.set(state.pitch);
   ui.roll.set(state.roll);
@@ -581,12 +808,13 @@ function updateLegend() {
   const q = sliceOn ? state.slice : state.body === 'voxels' && state.seed === 'off' ? 'pressure' : state.color;
   $('legend').style.display = !sliceOn && state.seed === 'off' && state.body !== 'voxels' ? 'none' : '';
   $('legendBar').style.background = lutCss(q);
-  const v = state.speed;
   if (q === 'speed') {
+    const top = 1.7 * uScale() * velScale();
+    const u = state.speed > 0 ? [3.6, 'km/h'] : [1, 'm/s'];
     $('legendTitle').textContent = 'Air speed';
     $('legendMin').textContent = '0';
-    $('legendMid').textContent = v ? `${Math.round(v * 0.85)}` : '';
-    $('legendMax').textContent = v ? `${Math.round(v * 1.7)} km/h` : 'fast';
+    $('legendMid').textContent = fmt(top * u[0] * 0.5, 1);
+    $('legendMax').textContent = `${fmt(top * u[0], 1)} ${u[1]}`;
   } else if (q === 'pressure') {
     $('legendTitle').textContent = 'Pressure coefficient';
     $('legendMin').textContent = '−1.25 suction';
@@ -796,10 +1024,12 @@ function setRunning(run) {
 function resetFlow() {
   worker.postMessage({ type: 'reset' });
   streaks.respawnAll();
-  smooth.cd = smooth.cl = null;
+  smooth.cd = smooth.cl = smooth.cs = null;
   history.cd.length = history.cl.length = 0;
+  log.length = clTrace.length = 0;
   drawSpark();
 }
+$('btnCsv').onclick = exportCsv;
 $('btnPlay').onclick = () => setRunning(!state.running);
 $('btnReset').onclick = resetFlow;
 $('btnShot').onclick = () => {
@@ -831,6 +1061,36 @@ window.addEventListener('keydown', (e) => {
     setRunning(!state.running);
   } else if (e.key === 'r' || e.key === 'R') resetFlow();
 });
+
+/* probe: hover the cut plane for local values */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const probeEl = $('probe');
+const probeOut = new Float32Array(4);
+canvas.addEventListener('pointermove', (e) => {
+  if (!slice.object.visible || !field?.ready || e.buttons) return (probeEl.hidden = true);
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(slice.object)[0];
+  if (!hit || !field.sample(hit.point.x, hit.point.y, hit.point.z, probeOut)) return (probeEl.hidden = true);
+  const C = velScale();
+  const A = air();
+  const sp = Math.hypot(probeOut[0], probeOut[1], probeOut[2]) * C;
+  const pa = ((probeOut[3] - field.rhoRef) / 3) * A.rho * C * C;
+  const q = realRef().q;
+  const mpw = metresPerWorld();
+  const lines = [
+    `speed     ${fmt(sp, 1)} m/s  (${fmt(sp * 3.6, 1)} km/h)`,
+    `u, v, w   ${fmt(probeOut[0] * C, 1)}, ${fmt(probeOut[1] * C, 1)}, ${fmt(probeOut[2] * C, 1)} m/s`,
+    `pressure  ${fmtPa(pa)} gauge${state.speed > 0 && q > 0 ? `  (Cp ${(pa / q).toFixed(2)})` : ''}`,
+    `position  ${fmt((hit.point.x - objectRoot.position.x) * mpw)}, ${fmt(hit.point.y * mpw)}, ${fmt(hit.point.z * mpw)} m`,
+  ];
+  probeEl.textContent = lines.join('\n');
+  probeEl.style.left = `${Math.min(e.clientX, window.innerWidth - 330)}px`;
+  probeEl.style.top = `${Math.min(e.clientY, window.innerHeight - 110)}px`;
+  probeEl.hidden = false;
+});
+canvas.addEventListener('pointerleave', () => (probeEl.hidden = true));
 
 /* ───────────────────────────── frame loop ───────────────────────────── */
 

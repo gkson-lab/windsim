@@ -41,3 +41,19 @@ assert.ok(cd > 0.2 && cd < 1.2, `sphere drag coefficient plausible (got ${cd})`)
 const wake = lat.ux[(cx + R + 4) + nx * (cy + ny * cz)];
 assert.ok(wake < U * 0.6, `wake deficit present (ux=${wake})`);
 console.log('kernel OK');
+
+// Fixed floor + inlet turbulence must stay stable and bounded.
+{
+  const l2 = new Lattice(64, 32, 32);
+  l2.setGeometry(new Uint8Array(l2.N), null, null);
+  l2.init(U);
+  l2.noSlipFloor = true;
+  l2.turbulence = 0.1;
+  for (let s = 0; s < 600; s++) l2.step(U, tau, 0);
+  let ok = true, nearWall = 0, mid = 0;
+  for (let c = 0; c < l2.N; c++) if (!Number.isFinite(l2.ux[c]) || Math.abs(l2.ux[c]) > 0.2) ok = false;
+  for (let x = 30; x < 60; x++) { nearWall += l2.ux[x + 64 * (1 + 32 * 16)]; mid += l2.ux[x + 64 * (16 + 32 * 16)]; }
+  assert.ok(ok, 'turbulent inlet + fixed floor stay bounded');
+  assert.ok(nearWall < mid * 0.9, `fixed floor slows the near-wall air (${(nearWall / mid).toFixed(2)})`);
+  console.log(`floor boundary layer OK (u_wall/u_mid ${(nearWall / mid).toFixed(2)})`);
+}

@@ -4,120 +4,280 @@
 //   grounded  sits on the tunnel floor instead of floating mid-stream
 //   seed      default smoke seeding ('inlet' | 'rake' | 'volume')
 //   fit       optional [x, y, z] box (world units) the model is scaled into
-import { THREE, mat, glass, box, cyl, sph, torus, extrude, planform, lathe, put, deco, wheel, naca, fan, aim } from './kit.js';
+import { THREE, mat, glass, box, cyl, sph, torus, extrude, planform, lathe, put, deco, tire, naca, fan, aim, loft, wing } from './kit.js';
 
 const G = () => new THREE.Group();
 const PI = Math.PI;
 
 /* ───────────────────────────── vehicles ───────────────────────────── */
 
+const lamp = (c) => mat(c, { emissive: c, emissiveIntensity: 0.8, roughness: 0.2 });
+
 function f1Car() {
   const g = G();
-  const body = mat('#d9132b', { roughness: 0.28, metalness: 0.35 });
-  const carbon = mat('#17181c', { roughness: 0.45, metalness: 0.4 });
-  const accent = mat('#f4f4f6', { roughness: 0.3 });
+  const body = mat('#d4102a', { roughness: 0.22, metalness: 0.45 });
+  const carbon = mat('#15161a', { roughness: 0.42, metalness: 0.45 });
+  const white = mat('#f2f3f5', { roughness: 0.3, metalness: 0.2 });
 
-  // Monocoque, nose and engine cover (side profile).
-  put(g, extrude(
-    [[-2.62, 0.2], [-2.55, 0.3], [-1.3, 0.52], [-0.75, 0.6], [-0.45, 0.6], [-0.3, 0.72], [0.0, 0.98], [0.45, 0.95],
-     [1.3, 0.62], [2.05, 0.42], [2.15, 0.28], [2.15, 0.16], [-1.3, 0.16], [-2.55, 0.17]], 0.44, body, 0.05));
-  // Floor and plank.
-  put(g, box(3.5, 0.05, 1.5, carbon, 0.02), 0.25, 0.1, 0);
-  // Sidepods with undercut and coke-bottle taper.
+  // Nose, survival cell and engine cover as one lofted shell.
+  put(g, loft([
+    { x: -2.62, w: 0.1, h: 0.07, y: 0.2, n: 2.2 },
+    { x: -2.3, w: 0.2, h: 0.13, y: 0.25 },
+    { x: -1.7, w: 0.32, h: 0.24, y: 0.36, n: 3 },
+    { x: -1.1, w: 0.48, h: 0.4, y: 0.42, n: 3.5 },
+    { x: -0.55, w: 0.6, h: 0.5, y: 0.44, n: 3.5 },
+    { x: -0.1, w: 0.58, h: 0.62, y: 0.5, n: 3 },
+    { x: 0.35, w: 0.5, h: 0.74, y: 0.56, n: 2.4 },
+    { x: 0.9, w: 0.44, h: 0.62, y: 0.5, n: 2.4 },
+    { x: 1.5, w: 0.32, h: 0.42, y: 0.4 },
+    { x: 2.05, w: 0.2, h: 0.24, y: 0.32 },
+    { x: 2.2, w: 0.12, h: 0.14, y: 0.3 },
+  ], body));
+  put(g, extrude([[0.45, 0.9], [1.95, 0.6], [1.95, 0.48], [0.45, 0.6]], 0.03, body));
+  put(g, deco(sph(0.2, mat('#08080a', { roughness: 0.9 }), 1.7, 0.45, 0.85)), -0.45, 0.69, 0);
+  put(g, deco(sph(0.1, mat('#08080a'), 0.6, 0.9, 1.2)), 0.13, 0.86, 0);
+
   for (const s of [-1, 1]) {
-    put(g, box(1.7, 0.36, 0.5, body, 0.12), 0.15, 0.42, s * 0.52);
-    put(g, box(0.9, 0.26, 0.34, body, 0.1), 1.25, 0.36, s * 0.4, [0, s * 0.22, 0]);
+    // Sidepods with undercut and coke-bottle taper.
+    put(g, loft([
+      { x: -0.62, w: 0.3, h: 0.26, y: 0.44, z: s * 0.5, n: 3.5 },
+      { x: -0.3, w: 0.5, h: 0.4, y: 0.4, z: s * 0.56, n: 4 },
+      { x: 0.5, w: 0.5, h: 0.36, y: 0.36, z: s * 0.54, n: 3.5 },
+      { x: 1.2, w: 0.36, h: 0.26, y: 0.3, z: s * 0.42, n: 3 },
+      { x: 1.85, w: 0.14, h: 0.12, y: 0.24, z: s * 0.26 },
+    ], body));
+    put(g, deco(box(0.03, 0.2, 0.36, mat('#08080a'), 0.01)), -0.6, 0.45, s * 0.52);
+    // Front wing endplates, rear wing endplates.
+    put(g, extrude([[-2.68, 0.04], [-2.0, 0.04], [-2.0, 0.36], [-2.3, 0.36], [-2.68, 0.15]], 0.025, carbon), 0, 0, s * 0.95);
+    put(g, extrude([[2.1, 0.28], [2.86, 0.28], [2.86, 1.1], [2.1, 1.03]], 0.025, carbon), 0, 0, s * 0.51);
+    // Wheels, brake ducts, suspension.
+    put(g, tire(0.36, 0.34, { rim: '#2a2c31' }), -1.7, 0.36, s * 0.83);
+    put(g, tire(0.36, 0.44, { rim: '#2a2c31' }), 1.75, 0.36, s * 0.79);
+    for (const [x, len, y0] of [[-1.7, 0.72, 0.3], [1.75, 0.62, 0.3]])
+      for (const [dy, dx] of [[0, -0.16], [0, 0.16], [0.2, -0.12], [0.2, 0.12]])
+        put(g, deco(cyl(0.014, len, carbon, 'z', 0.014, 8)), x + dx * 0.5, y0 + dy, s * 0.46, [0, dx * 0.9, 0]);
+    put(g, box(0.1, 0.06, 0.16, body, 0.02), -0.72, 0.68, s * 0.42);
+    // Floor edge fences.
+    put(g, deco(box(0.5, 0.1, 0.012, carbon)), -0.85, 0.16, s * 0.6, [0, s * 0.25, 0]);
   }
-  // Front wing: main plane, flap, endplates.
-  put(g, box(0.42, 0.035, 1.9, carbon), -2.5, 0.1, 0, [0, 0, 0.06]);
-  put(g, box(0.3, 0.03, 1.8, accent), -2.3, 0.2, 0, [0, 0, 0.32]);
-  for (const s of [-1, 1]) put(g, box(0.62, 0.26, 0.03, carbon), -2.42, 0.19, s * 0.95);
-  // Rear wing: two elements, endplates, pylon, beam wing.
-  put(g, box(0.4, 0.04, 1.02, carbon), 2.35, 0.98, 0, [0, 0, 0.22]);
-  put(g, box(0.26, 0.03, 1.02, accent), 2.56, 1.08, 0, [0, 0, 0.55]);
-  put(g, box(0.3, 0.03, 1.0, carbon), 2.3, 0.45, 0, [0, 0, 0.2]);
-  for (const s of [-1, 1]) put(g, box(0.72, 0.82, 0.03, carbon), 2.42, 0.72, s * 0.52);
-  put(g, box(0.3, 0.5, 0.05, carbon), 2.25, 0.65, 0);
-  // Diffuser.
-  put(g, box(0.75, 0.04, 1.3, carbon), 2.25, 0.2, 0, [0, 0, 0.28]);
-  // Wheels.
-  for (const s of [-1, 1]) {
-    put(g, wheel(0.36, 0.34), -1.7, 0.36, s * 0.83);
-    put(g, wheel(0.36, 0.44), 1.75, 0.36, s * 0.8);
-    // Suspension arms (decorative: thinner than a voxel).
-    for (const [x, len] of [[-1.7, 0.7], [1.75, 0.6]])
-      for (const dy of [0.28, 0.48]) put(g, deco(box(0.05, 0.02, len, carbon)), x, dy, s * 0.48, [s * 0.08, s * 0.25, 0]);
-  }
-  // Driver and halo.
-  put(g, sph(0.15, mat('#ffd400', { roughness: 0.3 })), -0.52, 0.7, 0);
-  const halo = torus(0.3, 0.025, carbon, PI);
+  // Floor with a pointed leading edge, plank and diffuser.
+  put(g, planform([[-1.5, -0.3], [-1.0, -0.72], [1.95, -0.72], [2.1, -0.5], [2.1, 0.5], [1.95, 0.72], [-1.0, 0.72], [-1.5, 0.3]], 0.04, carbon), 0, 0.09, 0);
+  put(g, box(0.8, 0.035, 1.3, carbon), 2.3, 0.2, 0, [0, 0, 0.3]);
+  for (const z of [-0.45, -0.15, 0.15, 0.45]) put(g, deco(box(0.7, 0.16, 0.012, carbon)), 2.3, 0.17, z, [0, 0, 0.3]);
+
+  // Three-element front wing (inverted sections, increasing incidence).
+  [[-2.66, 0.1, 0.3, -0.06, carbon], [-2.4, 0.13, 0.24, -0.3, white], [-2.2, 0.2, 0.2, -0.55, body]].forEach(([x, y, chord, aoa, m]) =>
+    put(g, wing([{ z: -0.94, chord, twist: aoa }, { z: 0.94, chord, twist: aoa }], m, { camber: -0.06, thick: 0.11 }), x, y, 0));
+  for (const s of [-1, 1]) put(g, box(0.16, 0.14, 0.03, carbon), -2.45, 0.19, s * 0.1);
+  // Rear wing: main plane + flap, beam wing, swan-neck pylon.
+  put(g, wing([{ z: -0.5, chord: 0.4, twist: -0.2 }, { z: 0.5, chord: 0.4, twist: -0.2 }], carbon, { camber: -0.07, thick: 0.13 }), 2.18, 0.9, 0);
+  put(g, wing([{ z: -0.5, chord: 0.24, twist: -0.62 }, { z: 0.5, chord: 0.24, twist: -0.62 }], white, { camber: -0.07, thick: 0.12 }), 2.58, 0.99, 0);
+  put(g, wing([{ z: -0.5, chord: 0.26, twist: -0.25 }, { z: 0.5, chord: 0.26, twist: -0.25 }], carbon, { camber: -0.05, thick: 0.12 }), 2.2, 0.42, 0);
+  put(g, box(0.34, 0.5, 0.04, carbon), 2.25, 0.66, 0);
+
+  // Driver, halo, camera pod.
+  put(g, sph(0.15, mat('#ffd400', { roughness: 0.25, metalness: 0.2 })), -0.5, 0.72, 0);
+  const halo = torus(0.3, 0.026, carbon, PI);
   halo.geometry.rotateX(-PI / 2);
   halo.geometry.rotateY(PI / 2);
-  put(g, deco(halo), -0.5, 0.76, 0);
-  // Mirrors + T-cam.
-  for (const s of [-1, 1]) put(g, box(0.1, 0.06, 0.16, body, 0.02), -0.7, 0.66, s * 0.42);
-  put(g, box(0.16, 0.08, 0.05, carbon, 0.02), 0.05, 1.05, 0);
+  put(g, deco(halo), -0.48, 0.79, 0);
+  put(g, deco(cyl(0.02, 0.22, carbon, 'y', 0.02, 8)), -0.78, 0.7, 0, [0, 0, 0.5]);
+  put(g, box(0.16, 0.07, 0.05, carbon, 0.02), 0.2, 0.96, 0);
   return g;
 }
 
-function sedan() {
+function roadCar({ lower, cabin, paint, wheelR = 0.33, wheelW = 0.23, axles = [-1.4, 1.4], track = 0.8, extras }) {
   const g = G();
-  const paint = mat('#2d6cdf', { roughness: 0.25, metalness: 0.5 });
-  const dark = mat('#11151c', { roughness: 0.12, metalness: 0.6 });
-  put(g, extrude(
-    [[-2.2, 0.24], [-2.28, 0.5], [-2.15, 0.68], [-1.15, 0.8], [1.45, 0.86], [2.18, 0.8], [2.26, 0.45], [2.18, 0.24]],
-    1.62, paint, 0.09));
-  put(g, extrude([[-1.05, 0.78], [-0.38, 1.3], [0.72, 1.33], [1.6, 0.84]], 1.42, dark, 0.08));
-  for (const x of [-1.38, 1.38]) for (const s of [-1, 1]) put(g, wheel(0.33, 0.24), x, 0.33, s * 0.8);
-  for (const s of [-1, 1]) put(g, box(0.12, 0.08, 0.18, paint, 0.03), -0.72, 0.9, s * 0.95);
-  for (const s of [-1, 1]) put(g, deco(box(0.05, 0.1, 0.36, mat('#fff7d6', { emissive: '#fff2b0', emissiveIntensity: 0.6 }), 0.02)), -2.33, 0.6, s * 0.6);
+  const gl = mat('#0d1117', { roughness: 0.08, metalness: 0.7 });
+  put(g, loft(lower, paint, { seg: 44 }));
+  put(g, loft(cabin, gl, { seg: 44 }));
+  for (const x of axles)
+    for (const s of [-1, 1]) {
+      put(g, tire(wheelR, wheelW), x, wheelR, s * track);
+      put(g, deco(cyl(wheelR * 1.16, 0.02, mat('#07080a', { roughness: 1 }), 'z')), x, wheelR * 1.02, s * (track - wheelW * 0.55));
+    }
+  const front = lower[0].x;
+  const rear = lower[lower.length - 1].x;
+  const wMid = lower[1].w;
+  const yMid = lower[1].y;
+  for (const s of [-1, 1]) {
+    put(g, deco(box(0.06, 0.09, 0.34, lamp('#fff6d8'), 0.02)), front + 0.1, yMid + 0.08, s * wMid * 0.33);
+    put(g, deco(box(0.06, 0.07, 0.4, lamp('#ff2a2a'), 0.02)), rear - 0.08, yMid + 0.14, s * wMid * 0.3);
+    put(g, box(0.13, 0.08, 0.17, paint, 0.03), cabin[1].x - 0.05, cabin[1].y - 0.1, s * (wMid * 0.54));
+  }
+  put(g, deco(box(0.04, 0.12, wMid * 0.5, mat('#08090b', { roughness: 0.6 }), 0.015)), front + 0.04, yMid - 0.08, 0);
+  extras?.(g);
   return g;
 }
+
+const sedan = () =>
+  roadCar({
+    paint: mat('#2a62d6', { roughness: 0.2, metalness: 0.6 }),
+    lower: [
+      { x: -2.32, w: 1.2, h: 0.34, y: 0.42, n: 3, nb: 4 },
+      { x: -2.2, w: 1.66, h: 0.46, y: 0.46, n: 4, nb: 5 },
+      { x: -1.5, w: 1.8, h: 0.58, y: 0.5, n: 4.5, nb: 6 },
+      { x: -0.6, w: 1.82, h: 0.66, y: 0.53, n: 5, nb: 6 },
+      { x: 0.6, w: 1.82, h: 0.68, y: 0.54, n: 5, nb: 6 },
+      { x: 1.6, w: 1.8, h: 0.66, y: 0.55, n: 4.5, nb: 6 },
+      { x: 2.2, w: 1.68, h: 0.56, y: 0.56, n: 4, nb: 5 },
+      { x: 2.34, w: 1.3, h: 0.4, y: 0.54, n: 3, nb: 4 },
+    ],
+    cabin: [
+      { x: -1.05, w: 1.36, h: 0.04, y: 0.84, n: 4 },
+      { x: -0.45, w: 1.5, h: 0.5, y: 1.04, n: 5 },
+      { x: 0.45, w: 1.5, h: 0.62, y: 1.09, n: 5.5 },
+      { x: 1.1, w: 1.44, h: 0.5, y: 1.05, n: 5 },
+      { x: 1.8, w: 1.34, h: 0.04, y: 0.86, n: 4 },
+    ],
+  });
+
+const sportsCar = () =>
+  roadCar({
+    paint: mat('#f2a900', { roughness: 0.18, metalness: 0.55 }),
+    wheelR: 0.34,
+    wheelW: 0.28,
+    axles: [-1.32, 1.3],
+    track: 0.84,
+    lower: [
+      { x: -2.25, w: 1.1, h: 0.18, y: 0.3, n: 3, nb: 5 },
+      { x: -2.05, w: 1.74, h: 0.32, y: 0.36, n: 3.5, nb: 6 },
+      { x: -1.3, w: 1.92, h: 0.48, y: 0.42, n: 3.5, nb: 7 },
+      { x: -0.4, w: 1.94, h: 0.56, y: 0.44, n: 4, nb: 7 },
+      { x: 0.7, w: 1.98, h: 0.62, y: 0.47, n: 4, nb: 7 },
+      { x: 1.6, w: 1.98, h: 0.62, y: 0.5, n: 4, nb: 7 },
+      { x: 2.12, w: 1.84, h: 0.5, y: 0.54, n: 3.5, nb: 5 },
+      { x: 2.24, w: 1.4, h: 0.3, y: 0.56, n: 3, nb: 4 },
+    ],
+    cabin: [
+      { x: -0.75, w: 1.3, h: 0.04, y: 0.7, n: 3.5 },
+      { x: -0.15, w: 1.44, h: 0.44, y: 0.88, n: 4 },
+      { x: 0.5, w: 1.42, h: 0.5, y: 0.92, n: 4 },
+      { x: 1.3, w: 1.3, h: 0.3, y: 0.86, n: 3.5 },
+      { x: 2.0, w: 1.1, h: 0.04, y: 0.78, n: 3 },
+    ],
+    extras: (g) => {
+      const carbon = mat('#15161a', { roughness: 0.4, metalness: 0.4 });
+      put(g, wing([{ z: -0.8, chord: 0.3, twist: -0.18 }, { z: 0.8, chord: 0.3, twist: -0.18 }], carbon, { camber: -0.05 }), 1.92, 1.02, 0);
+      for (const s of [-1, 1]) put(g, box(0.1, 0.24, 0.04, carbon), 2.02, 0.9, s * 0.5);
+      put(g, box(0.5, 0.03, 1.7, carbon), -2.15, 0.2, 0);
+    },
+  });
+
+const suv = () =>
+  roadCar({
+    paint: mat('#3d4a3f', { roughness: 0.3, metalness: 0.5 }),
+    wheelR: 0.39,
+    wheelW: 0.27,
+    axles: [-1.42, 1.38],
+    track: 0.82,
+    lower: [
+      { x: -2.34, w: 1.4, h: 0.5, y: 0.62, n: 3.5, nb: 4 },
+      { x: -2.2, w: 1.8, h: 0.66, y: 0.66, n: 5, nb: 5 },
+      { x: -1.4, w: 1.92, h: 0.78, y: 0.7, n: 5.5, nb: 6 },
+      { x: -0.4, w: 1.94, h: 0.84, y: 0.72, n: 6, nb: 6 },
+      { x: 1.0, w: 1.94, h: 0.86, y: 0.73, n: 6, nb: 6 },
+      { x: 2.2, w: 1.88, h: 0.84, y: 0.74, n: 5, nb: 5 },
+      { x: 2.36, w: 1.6, h: 0.66, y: 0.74, n: 4, nb: 4 },
+    ],
+    cabin: [
+      { x: -0.95, w: 1.5, h: 0.04, y: 1.12, n: 5 },
+      { x: -0.35, w: 1.66, h: 0.56, y: 1.38, n: 6 },
+      { x: 1.0, w: 1.66, h: 0.62, y: 1.41, n: 6 },
+      { x: 2.05, w: 1.6, h: 0.56, y: 1.38, n: 6 },
+      { x: 2.3, w: 1.5, h: 0.2, y: 1.2, n: 5 },
+    ],
+    extras: (g) => {
+      for (const s of [-1, 1]) put(g, deco(cyl(0.02, 2.2, mat('#101114'), 'x', 0.02, 8)), 0.8, 1.76, s * 0.62);
+    },
+  });
 
 function pickup() {
   const g = G();
-  const paint = mat('#c8cdd4', { roughness: 0.3, metalness: 0.6 });
-  const dark = mat('#14171c', { roughness: 0.2, metalness: 0.5 });
-  put(g, box(5.4, 0.42, 1.9, paint, 0.08), 0, 0.62, 0);
-  put(g, box(1.55, 0.5, 1.9, paint, 0.14), -1.9, 0.98, 0);
-  put(g, box(1.75, 0.82, 1.84, dark, 0.16), -0.35, 1.42, 0);
-  put(g, box(1.8, 0.2, 1.88, paint, 0.08), -0.35, 1.05, 0);
-  for (const s of [-1, 1]) put(g, box(2.1, 0.5, 0.08, paint, 0.02), 1.62, 1.06, s * 0.9);
-  put(g, box(0.08, 0.5, 1.84, paint, 0.02), 2.66, 1.06, 0);
-  for (const x of [-1.75, 1.6]) for (const s of [-1, 1]) put(g, wheel(0.42, 0.3), x, 0.42, s * 0.84);
-  put(g, deco(box(0.06, 0.34, 1.3, dark, 0.02)), -2.7, 0.95, 0);
+  const paint = mat('#c8cdd4', { roughness: 0.28, metalness: 0.65 });
+  const dark = mat('#0d1117', { roughness: 0.1, metalness: 0.7 });
+  const trim = mat('#15171b', { roughness: 0.6 });
+  put(g, loft([
+    { x: -2.75, w: 1.5, h: 0.5, y: 0.72, n: 4, nb: 4 },
+    { x: -2.6, w: 1.9, h: 0.66, y: 0.76, n: 6, nb: 5 },
+    { x: -1.2, w: 1.96, h: 0.74, y: 0.8, n: 6, nb: 6 },
+    { x: -1.05, w: 1.96, h: 0.78, y: 0.82, n: 6, nb: 6 },
+  ], paint));
+  put(g, loft([
+    { x: -1.15, w: 1.9, h: 0.5, y: 0.7, n: 6 },
+    { x: -0.95, w: 1.94, h: 1.2, y: 1.04, n: 6 },
+    { x: -0.3, w: 1.94, h: 1.36, y: 1.12, n: 7 },
+    { x: 0.55, w: 1.94, h: 1.36, y: 1.12, n: 7 },
+    { x: 0.7, w: 1.9, h: 1.2, y: 1.04, n: 6 },
+  ], paint, { sub: 3 }));
+  put(g, deco(box(0.9, 0.5, 1.96, dark, 0.05)), -0.15, 1.5, 0);
+  put(g, deco(box(0.05, 0.5, 1.6, dark, 0.02)), -1.0, 1.48, 0, [0, 0, -0.35]);
+  put(g, box(2.2, 0.14, 1.94, paint, 0.03), 1.7, 0.52, 0);
+  for (const s of [-1, 1]) put(g, box(2.2, 0.56, 0.08, paint, 0.03), 1.7, 0.86, s * 0.93);
+  put(g, box(0.08, 0.56, 1.94, paint, 0.03), 2.78, 0.86, 0);
+  put(g, box(0.1, 0.2, 1.9, trim, 0.03), 2.84, 0.5, 0);
+  put(g, deco(box(0.06, 0.36, 1.4, trim, 0.02)), -2.78, 0.8, 0);
+  for (const s of [-1, 1]) {
+    put(g, deco(box(0.06, 0.14, 0.26, lamp('#fff6d8'), 0.02)), -2.72, 0.9, s * 0.78);
+    put(g, deco(box(0.05, 0.3, 0.1, lamp('#ff2a2a'), 0.02)), 2.83, 0.9, s * 0.9);
+    put(g, box(0.14, 0.2, 0.2, trim, 0.03), -0.9, 1.28, s * 1.06);
+    for (const x of [-1.85, 1.75]) put(g, tire(0.43, 0.3), x, 0.43, s * 0.85);
+  }
   return g;
 }
 
 function semi() {
   const g = G();
-  const cab = mat('#e04a1c', { roughness: 0.3, metalness: 0.4 });
+  const cab = mat('#e04a1c', { roughness: 0.28, metalness: 0.45 });
   const white = mat('#eef1f5', { roughness: 0.5 });
   const dark = mat('#15171b', { roughness: 0.5 });
-  put(g, box(2.1, 2.3, 2.4, cab, 0.22), -5.3, 1.95, 0);
-  put(g, extrude([[-6.2, 3.05], [-4.3, 3.05], [-4.3, 3.95], [-5.2, 3.8]], 2.3, cab, 0.04));
-  put(g, deco(box(0.06, 0.8, 2.0, mat('#0f1319', { roughness: 0.1, metalness: 0.7 }), 0.02)), -6.36, 2.5, 0);
-  put(g, box(10.4, 2.9, 2.5, white, 0.05), 1.3, 2.55, 0);
-  put(g, box(11.6, 0.3, 1.0, dark), 0.3, 0.92, 0);
-  for (const x of [-5.4, -3.6, -2.6, 4.6, 5.7]) for (const s of [-1, 1]) put(g, wheel(0.52, 0.55, undefined, mat('#8b929c', { metalness: 0.7, roughness: 0.4 })), x, 0.52, s * 0.95);
+  put(g, loft([
+    { x: -6.4, w: 2.2, h: 2.2, y: 1.9, n: 6 },
+    { x: -6.2, w: 2.44, h: 2.5, y: 2.0, n: 8 },
+    { x: -5.2, w: 2.46, h: 2.9, y: 2.2, n: 8 },
+    { x: -4.3, w: 2.46, h: 3.1, y: 2.3, n: 8 },
+  ], cab, { sub: 4 }));
+  put(g, loft([
+    { x: -5.9, w: 2.0, h: 0.1, y: 3.6, n: 4 },
+    { x: -5.0, w: 2.4, h: 0.7, y: 3.75, n: 4 },
+    { x: -4.25, w: 2.46, h: 0.9, y: 3.72, n: 6 },
+  ], cab, { sub: 4 }));
+  put(g, deco(box(0.06, 0.85, 2.1, mat('#0d1117', { roughness: 0.08, metalness: 0.7 }), 0.02)), -6.36, 2.6, 0);
+  put(g, deco(box(0.06, 0.7, 1.5, dark, 0.02)), -6.44, 1.4, 0);
+  put(g, box(10.4, 2.9, 2.5, white, 0.06), 1.3, 2.6, 0);
+  put(g, box(11.8, 0.3, 1.0, dark), 0.2, 0.95, 0);
+  for (const s of [-1, 1]) {
+    put(g, box(4.6, 0.6, 0.04, dark), 1.2, 0.85, s * 1.22);
+    put(g, box(0.18, 0.4, 0.16, dark, 0.03), -6.0, 2.9, s * 1.36);
+    for (const x of [-5.5, -3.7, -2.6, 4.6, 5.75]) put(g, tire(0.52, 0.56, { rim: '#8b929c', spokes: 8 }), x, 0.52, s * 0.95);
+  }
   return g;
 }
 
 function airliner() {
   const g = G();
-  const white = mat('#f1f4f8', { roughness: 0.3, metalness: 0.2 });
+  const white = mat('#f1f4f8', { roughness: 0.28, metalness: 0.25 });
   const navy = mat('#14306b', { roughness: 0.35, metalness: 0.3 });
-  const metal = mat('#9aa3b0', { roughness: 0.3, metalness: 0.8 });
-  put(g, lathe([[0, 0], [0.9, 0.9], [1.7, 2.4], [1.95, 4.2], [1.95, 26], [1.6, 30], [0.9, 34], [0.25, 36.5], [0, 36.6]], white), -18.3, 0, 0);
-  const wing = (s) => [[-4.5, s * 1.8], [-0.2, s * 17], [1.6, s * 17], [2.2, s * 1.8]];
+  const metal = mat('#9aa3b0', { roughness: 0.3, metalness: 0.85 });
+  put(g, lathe([[0, 0], [0.5, 0.25], [1.1, 1.1], [1.7, 2.6], [1.95, 4.4], [1.95, 25], [1.75, 28.5], [1.2, 32.5], [0.5, 35.8], [0.15, 36.6], [0, 36.7]], white), -18.3, 0, 0);
+  put(g, deco(box(1.0, 0.36, 2.9, mat('#0d1117', { roughness: 0.1, metalness: 0.7 }), 0.1)), -16.2, 0.55, 0, [0, 0, 0.5]);
   for (const s of [-1, 1]) {
-    put(g, planform(wing(s), 0.5, white, 0.12), -1.5, -0.5, 0, [s * 0.09, 0, 0]);
-    put(g, planform([[-2.2, s * 0.8], [0.3, s * 6.2], [1.5, s * 6.2], [1.2, s * 0.8]], 0.3, white, 0.08), 15.2, 0.6, 0);
-    const pod = lathe([[0, 0], [0.75, 0.15], [1.0, 1.0], [0.95, 3.2], [0.55, 4.4], [0, 4.5]], metal);
-    put(g, pod, -5.6, -1.75, s * 6.2);
-    put(g, box(2.2, 0.9, 0.22, white, 0.08), -3.2, -1.05, s * 6.2);
+    // Swept, tapered main wing with dihedral and a blended winglet.
+    put(g, wing([
+      { z: s * 1.6, chord: 7.2, x: -5.2, y: -0.75, twist: 0.03 },
+      { z: s * 6.4, chord: 4.4, x: -1.6, y: -0.3, twist: 0.02 },
+      { z: s * 16.6, chord: 1.7, x: 5.0, y: 0.75, twist: -0.02 },
+      { z: s * 17.4, chord: 1.1, x: 5.9, y: 1.5 },
+      { z: s * 17.7, chord: 0.6, x: 6.6, y: 2.6 },
+    ], white, { thick: 0.13, camber: 0.025 }));
+    put(g, wing([{ z: s * 0.6, chord: 3.6, x: 13.4, y: 0.7 }, { z: s * 6.6, chord: 1.3, x: 17.2, y: 1.2 }], white, { thick: 0.1, camber: 0 }));
+    // High-bypass engine: nacelle, intake lip, pylon.
+    put(g, lathe([[0, 0.25], [0.95, 0.3], [1.12, 0.05], [1.2, 0.5], [1.18, 2.4], [0.8, 3.9], [0.45, 4.6], [0, 4.7]], metal), -6.6, -1.9, s * 6.2);
+    put(g, deco(cyl(0.96, 0.05, mat('#1a1c20', { roughness: 0.4, metalness: 0.6 }), 'x')), -6.32, -1.9, s * 6.2);
+    put(g, box(2.6, 0.9, 0.2, white, 0.08), -3.9, -1.05, s * 6.2);
+    for (let i = 0; i < 26; i++) put(g, deco(box(0.26, 0.24, 0.02, mat('#16202e', { roughness: 0.2 }), 0.008)), -13.5 + i * 1.05, 0.45, s * 1.9);
   }
-  put(g, extrude([[12.5, 1.5], [16.6, 8.2], [18.4, 8.2], [17.6, 1.2]], 0.36, navy, 0.1));
+  put(g, extrude([[12.2, 1.5], [16.4, 8.4], [18.3, 8.4], [17.7, 1.2]], 0.34, navy, 0.12));
   return g;
 }
 
@@ -213,19 +373,52 @@ function pcCase({ L = 0.46, H = 0.48, W = 0.22, front = 'mesh', frontFans = 3, t
     put(g, box(t, H, W, glass('#a8dcff', 0.2)), -L / 2, y0 + H / 2, 0);
     put(g, box(inset, t, W, panel), -L / 2 + inset / 2, y0 + H, 0);
   }
-  // PSU shroud, motherboard, CPU tower cooler, GPU, RAM.
+  // PSU shroud with the supply inside, motherboard, tower cooler, GPU, RAM.
   put(g, box(L - 0.03, 0.085, W - 2 * t, panel), 0.005, y0 + t + 0.042, 0);
+  put(g, deco(box(0.15, 0.07, 0.012, mat('#2b2f38', { roughness: 0.4, metalness: 0.7 }))), L / 2 - 0.1, y0 + t + 0.042, W / 2 - t - 0.004);
   const mbX = L / 2 - 0.02 - 0.125;
   const mbY = y0 + H - 0.03 - 0.15;
-  put(g, box(0.25, 0.3, 0.008, pcb), mbX, mbY, -W / 2 + 0.02);
-  const cz = -W / 2 + 0.024 + 0.055;
-  put(g, box(0.07, 0.12, 0.11, metal, 0.006), mbX + 0.01, mbY + 0.06, cz);
-  put(g, aim(fan(0.05, { strength: 0.8 }), '+x'), mbX - 0.04, mbY + 0.06, cz);
+  const mbZ = -W / 2 + 0.02;
+  put(g, box(0.25, 0.3, 0.008, pcb), mbX, mbY, mbZ);
+  // VRM heatsinks, chipset block, rear I/O shield.
+  put(g, deco(box(0.03, 0.09, 0.025, metal, 0.004)), mbX + 0.07, mbY + 0.08, mbZ + 0.016);
+  put(g, deco(box(0.1, 0.022, 0.025, metal, 0.004)), mbX + 0.01, mbY + 0.133, mbZ + 0.016);
+  put(g, deco(box(0.06, 0.06, 0.012, mat('#22262e', { metalness: 0.6, roughness: 0.4 }), 0.004)), mbX - 0.07, mbY - 0.1, mbZ + 0.01);
+  put(g, box(0.02, 0.15, 0.045, metal), L / 2 - 0.022, mbY + 0.07, mbZ + 0.03);
+  const cz = mbZ + 0.004 + 0.055;
+  // Tower cooler: fin stack (visual), solid core for the solver, heat pipes, push fan.
+  put(g, box(0.05, 0.11, 0.1, mat('#6f7884', { roughness: 0.5, metalness: 0.8 })), mbX + 0.012, mbY + 0.06, cz);
+  for (let i = 0; i < 22; i++) put(g, deco(box(0.066, 0.0018, 0.112, metal)), mbX + 0.012, mbY + 0.008 + i * 0.005, cz);
+  for (const dz of [-0.03, -0.01, 0.01, 0.03]) put(g, deco(cyl(0.004, 0.14, mat('#b87333', { metalness: 0.9, roughness: 0.3 }), 'y', 0.004, 8)), mbX + 0.012, mbY + 0.055, cz + dz);
+  put(g, deco(box(0.05, 0.02, 0.05, mat('#b87333', { metalness: 0.9, roughness: 0.3 }))), mbX + 0.012, mbY - 0.01, mbZ + 0.016);
+  put(g, aim(fan(0.05, { strength: 0.8, thick: 0.02 }), '+x'), mbX - 0.036, mbY + 0.06, cz);
   if (H > 0.34) {
-    put(g, box(0.29, 0.045, 0.125, mat('#23272f', { roughness: 0.4, metalness: 0.6 }), 0.008), mbX - 0.04, mbY - 0.075, -W / 2 + 0.024 + 0.066);
-    put(g, deco(box(0.27, 0.004, 0.012, mat(accent, { emissive: accent, emissiveIntensity: 1.6 }))), mbX - 0.04, mbY - 0.05, -W / 2 + 0.15);
+    // Graphics card: PCB, heatsink shroud, backplate, three (visual) fans, power cables.
+    const gy = mbY - 0.075;
+    const gz = mbZ + 0.004 + 0.066;
+    put(g, box(0.29, 0.045, 0.125, mat('#23272f', { roughness: 0.4, metalness: 0.6 }), 0.008), mbX - 0.04, gy, gz);
+    put(g, deco(box(0.292, 0.004, 0.128, mat('#3a3f4a', { metalness: 0.85, roughness: 0.3 }))), mbX - 0.04, gy + 0.025, gz);
+    for (const dx of [-0.095, 0, 0.095]) put(g, deco(aim(fan(0.04, { thick: 0.008, frame: false }), '-y')), mbX - 0.04 + dx, gy - 0.024, gz);
+    put(g, deco(box(0.27, 0.004, 0.012, mat(accent, { emissive: accent, emissiveIntensity: 1.6 }))), mbX - 0.04, gy + 0.02, gz + 0.064);
+    for (const dz of [0, 0.012]) {
+      const cable = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+          new THREE.Vector3(mbX - 0.1, gy + 0.025, gz + 0.03 + dz), new THREE.Vector3(mbX - 0.11, gy + 0.07, gz + 0.04 + dz),
+          new THREE.Vector3(mbX - 0.15, gy + 0.03, mbZ + 0.03), new THREE.Vector3(mbX - 0.15, y0 + 0.1, mbZ + 0.02),
+        ]), 20, 0.005, 6),
+        mat('#0c0d10', { roughness: 0.8 }),
+      );
+      put(g, deco(cable));
+    }
   }
-  for (const dx of [0.075, 0.09]) put(g, deco(box(0.006, 0.13, 0.03, mat(accent, { emissive: accent, emissiveIntensity: 0.9 }))), mbX - dx - 0.01, mbY + 0.07, -W / 2 + 0.04);
+  // Four RAM sticks with light bars.
+  for (let i = 0; i < 4; i++) {
+    const rx = mbX - 0.07 - i * 0.011;
+    put(g, deco(box(0.006, 0.13, 0.032, mat('#1a1d23', { metalness: 0.6, roughness: 0.4 }))), rx, mbY + 0.07, mbZ + 0.02);
+    put(g, deco(box(0.006, 0.13, 0.005, mat(accent, { emissive: accent, emissiveIntensity: 1.2 }))), rx, mbY + 0.07, mbZ + 0.038);
+  }
+  // Rear expansion slots.
+  for (let i = 0; i < 7; i++) put(g, deco(box(0.004, 0.016, 0.1, metal)), L / 2 + 0.007, y0 + 0.11 + i * 0.021, -0.02);
   // Fans.
   const usable = H - 0.085 - 0.04;
   for (let i = 0; i < frontFans; i++)
@@ -454,13 +647,15 @@ function skyline() {
 export const CATEGORIES = ['All', 'Vehicles', 'PC hardware', 'Food & fun', 'Shapes'];
 
 export const PRESETS = [
-  { id: 'f1', name: 'F1 car', cat: 'Vehicles', desc: 'Open-wheel racer with front + rear wings and diffuser', real: 5.4, speed: 280, grounded: true, seed: 'inlet', build: f1Car },
-  { id: 'sedan', name: 'Sedan', cat: 'Vehicles', desc: 'Three-box family car', real: 4.6, speed: 120, grounded: true, build: sedan },
-  { id: 'pickup', name: 'Pickup truck', cat: 'Vehicles', desc: 'Open bed makes a big recirculation bubble', real: 5.5, speed: 110, grounded: true, build: pickup },
-  { id: 'semi', name: 'Semi truck', cat: 'Vehicles', desc: 'Cab-over tractor and box trailer', real: 13, speed: 90, grounded: true, build: semi },
+  { id: 'f1', ref: 'Cd 0.7–1.1, Cl −2.5 to −3.5', name: 'F1 car', cat: 'Vehicles', desc: 'Open-wheel racer with front + rear wings and diffuser', real: 5.4, speed: 280, grounded: true, seed: 'inlet', build: f1Car },
+  { id: 'sedan', ref: 'Cd 0.24–0.32', name: 'Sedan', cat: 'Vehicles', desc: 'Three-box family car', real: 4.6, speed: 120, grounded: true, build: sedan },
+  { id: 'sports', name: 'Sports coupé', cat: 'Vehicles', desc: 'Low fastback with a rear wing and splitter', real: 4.5, speed: 200, grounded: true, ref: 'Cd 0.30–0.36', build: sportsCar },
+  { id: 'suv', name: 'SUV', cat: 'Vehicles', desc: 'Tall two-box body with a blunt tail', real: 4.7, speed: 110, grounded: true, ref: 'Cd 0.33–0.40', build: suv },
+  { id: 'pickup', ref: 'Cd 0.40–0.50', name: 'Pickup truck', cat: 'Vehicles', desc: 'Open bed makes a big recirculation bubble', real: 5.5, speed: 110, grounded: true, build: pickup },
+  { id: 'semi', ref: 'Cd 0.6–0.9', name: 'Semi truck', cat: 'Vehicles', desc: 'Cab-over tractor and box trailer', real: 13, speed: 90, grounded: true, build: semi },
   { id: 'airliner', name: 'Airliner', cat: 'Vehicles', desc: 'Twin-engine jet in cruise', real: 37, speed: 320, grounded: false, pitch: 3, fit: [1.9, 0.9, 1.6], build: airliner },
-  { id: 'rocket', name: 'Rocket', cat: 'Vehicles', desc: 'Ogive nose, four fins', real: 6, speed: 350, grounded: false, build: rocket },
-  { id: 'cyclist', name: 'Cyclist', cat: 'Vehicles', desc: 'Rider in the drops on a road bike', real: 1.75, speed: 45, grounded: true, fit: [1.2, 1.0, 0.8], build: cyclist },
+  { id: 'rocket', ref: 'Cd 0.3–0.5', name: 'Rocket', cat: 'Vehicles', desc: 'Ogive nose, four fins', real: 6, speed: 350, grounded: false, build: rocket },
+  { id: 'cyclist', ref: 'CdA 0.25–0.35 m²', name: 'Cyclist', cat: 'Vehicles', desc: 'Rider in the drops on a road bike', real: 1.75, speed: 45, grounded: true, fit: [1.2, 1.0, 0.8], build: cyclist },
 
   { id: 'pc-mesh', name: 'Mesh-front tower', cat: 'PC hardware', desc: 'Three intakes, rear + top exhaust. Free-breathing.', real: 0.5, speed: 0, grounded: true, seed: 'volume', fit: [1.4, 1.15, 0.9], fans: true, build: () => pcCase({ front: 'mesh' }) },
   { id: 'pc-glass', name: 'Glass-front tower', cat: 'PC hardware', desc: 'Sealed front panel: intakes starve through side gaps', real: 0.5, speed: 0, grounded: true, seed: 'volume', fit: [1.4, 1.15, 0.9], fans: true, build: () => pcCase({ front: 'glass', color: '#f1f2f4', accent: '#ff5fd2' }) },
@@ -475,13 +670,13 @@ export const PRESETS = [
   { id: 'duck', name: 'Rubber duck', cat: 'Food & fun', desc: 'The classic debugging companion', real: 0.09, speed: 20, grounded: true, fit: [1.2, 0.9, 0.85], build: duck },
   { id: 'cow', name: 'Spherical cow', cat: 'Food & fun', desc: 'Assume a spherical cow in a wind tunnel', real: 2.2, speed: 40, grounded: true, fit: [1.2, 0.95, 0.85], build: sphericalCow },
 
-  { id: 'sphere', name: 'Sphere', cat: 'Shapes', desc: 'The reference bluff body', real: 0.2, speed: 80, grounded: false, fit: [0.7, 0.7, 0.7], build: shape(() => sph(0.5, steel())) },
-  { id: 'golf', name: 'Golf ball', cat: 'Shapes', desc: 'Dimpled sphere', real: 0.043, speed: 250, grounded: false, fit: [0.7, 0.7, 0.7], build: golfBall },
-  { id: 'cube', name: 'Cube', cat: 'Shapes', desc: 'Sharp edges, fixed separation', real: 0.2, speed: 80, grounded: false, fit: [0.6, 0.6, 0.6], build: shape(() => box(1, 1, 1, steel())) },
-  { id: 'cylinder', name: 'Cylinder', cat: 'Shapes', desc: 'Crossflow cylinder: von Kármán vortex street', real: 0.3, speed: 60, grounded: false, fit: [0.42, 0.42, 1.8], slice: true, build: shape(() => cyl(0.25, 2.2, steel(), 'z')) },
-  { id: 'airfoil', name: 'Airfoil', cat: 'Shapes', desc: 'NACA 2412 wing section at 8° angle of attack', real: 1.5, speed: 200, grounded: false, pitch: 8, fit: [1.2, 0.6, 1.3], slice: true, build: shape(() => extrude(naca(1.5), 1.9, steel())) },
-  { id: 'plate', name: 'Flat plate', cat: 'Shapes', desc: 'Plate normal to the flow: maximum drag', real: 0.5, speed: 80, grounded: false, fit: [0.6, 0.75, 0.75], build: shape(() => box(0.06, 1, 1, steel())) },
-  { id: 'teardrop', name: 'Teardrop', cat: 'Shapes', desc: 'Streamlined body of revolution', real: 1.0, speed: 200, grounded: false, fit: [1.5, 0.6, 0.6],
+  { id: 'sphere', ref: 'Cd 0.47 (0.1–0.2 above Re 3×10⁵)', name: 'Sphere', cat: 'Shapes', desc: 'The reference bluff body', real: 0.2, speed: 80, grounded: false, fit: [0.7, 0.7, 0.7], build: shape(() => sph(0.5, steel())) },
+  { id: 'golf', ref: 'Cd ≈ 0.25', name: 'Golf ball', cat: 'Shapes', desc: 'Dimpled sphere', real: 0.043, speed: 250, grounded: false, fit: [0.7, 0.7, 0.7], build: golfBall },
+  { id: 'cube', ref: 'Cd ≈ 1.05', name: 'Cube', cat: 'Shapes', desc: 'Sharp edges, fixed separation', real: 0.2, speed: 80, grounded: false, fit: [0.6, 0.6, 0.6], build: shape(() => box(1, 1, 1, steel())) },
+  { id: 'cylinder', ref: 'Cd 1.0–1.2, St ≈ 0.2', name: 'Cylinder', cat: 'Shapes', desc: 'Crossflow cylinder: von Kármán vortex street', real: 0.3, speed: 60, grounded: false, fit: [0.42, 0.42, 1.8], slice: true, build: shape(() => cyl(0.25, 2.2, steel(), 'z')) },
+  { id: 'airfoil', ref: 'section Cl ≈ 1.1 at 8°', name: 'Airfoil', cat: 'Shapes', desc: 'NACA 2412 wing section at 8° angle of attack', real: 1.5, speed: 200, grounded: false, pitch: 8, fit: [1.2, 0.6, 1.3], slice: true, build: shape(() => extrude(naca(1.5), 1.9, steel())) },
+  { id: 'plate', ref: 'Cd 1.17–1.28', name: 'Flat plate', cat: 'Shapes', desc: 'Plate normal to the flow: maximum drag', real: 0.5, speed: 80, grounded: false, fit: [0.6, 0.75, 0.75], build: shape(() => box(0.06, 1, 1, steel())) },
+  { id: 'teardrop', ref: 'Cd 0.04–0.09', name: 'Teardrop', cat: 'Shapes', desc: 'Streamlined body of revolution', real: 1.0, speed: 200, grounded: false, fit: [1.5, 0.6, 0.6],
     build: shape(() => lathe(Array.from({ length: 33 }, (_, i) => { const x = i / 32; return [4.5 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4) * (i === 32 ? 0 : 1), x * 3]; }), steel())) },
   { id: 'skyline', name: 'City block', cat: 'Shapes', desc: 'Urban canyon wind between towers', real: 180, speed: 60, grounded: true, fit: [1.5, 1.2, 1.1], build: skyline },
 ];

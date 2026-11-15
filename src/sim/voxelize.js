@@ -124,28 +124,38 @@ export function voxelize(root, grid) {
     for (let a = 0; a < 3; a++) castAxis(tris, a, dims, votes, surf);
     const fan = o.userData.fan;
     if (fan) {
-      const dir = new THREE.Vector3(0, 1, 0).transformDirection(o.matrixWorld).multiplyScalar(fan.strength ?? 1);
+      const dir = new THREE.Vector3(0, 1, 0).transformDirection(o.matrixWorld);
+      const radius = (fan.radius ?? 0.05) * o.matrixWorld.getMaxScaleOnAxis();
       const cells = [];
       for (let c = 0; c < N; c++) if (votes[c] >= 2 || surf[c]) cells.push(c);
-      fans.push({ cells, dir });
+      fans.push({ cells, dir, radius, strength: fan.strength ?? 1 });
     } else {
       for (let c = 0; c < N; c++) if (votes[c] >= 2 || surf[c]) flag[c] = SOLID;
     }
   });
 
+  // Fans become actuator discs. The push is divided by the disc's thickness in
+  // cells so every fan delivers the same pressure rise however it voxelised.
   const fanIdx = [];
   const fanVec = [];
-  for (const { cells, dir } of fans)
+  const fanInfo = [];
+  for (const f of fans) {
+    const cells = f.cells.filter((c) => flag[c] === FLUID);
+    if (!cells.length) continue;
+    const discCells = (Math.PI * f.radius * f.radius) / (h * h);
+    const layers = Math.min(4, Math.max(1, cells.length / Math.max(1, discCells)));
+    const k = f.strength / layers;
     for (const c of cells) {
-      if (flag[c] !== FLUID) continue;
       flag[c] = FAN;
       fanIdx.push(c);
-      fanVec.push(dir.x, dir.y, dir.z);
+      fanVec.push(f.dir.x * k, f.dir.y * k, f.dir.z * k);
     }
+    fanInfo.push({ cells: Int32Array.from(cells), dir: [f.dir.x, f.dir.y, f.dir.z], area: Math.PI * f.radius * f.radius, strength: f.strength });
+  }
 
   let solidCount = 0;
   for (let c = 0; c < N; c++) if (flag[c] === SOLID) solidCount++;
-  return { flag, fanIdx: Int32Array.from(fanIdx), fanVec: Float32Array.from(fanVec), solidCount };
+  return { flag, fanIdx: Int32Array.from(fanIdx), fanVec: Float32Array.from(fanVec), fans: fanInfo, solidCount };
 }
 
 /** Frontal area (in cells) seen by the wind, plus the streamwise extent. */
