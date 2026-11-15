@@ -3,7 +3,8 @@
 //   speed     default wind speed, km/h
 //   grounded  sits on the tunnel floor instead of floating mid-stream
 //   seed      default smoke seeding ('inlet' | 'rake' | 'volume')
-//   fit       optional [x, y, z] box (world units) the model is scaled into
+//   temp/alt  ambient air temperature (°C) and altitude (m) the subject normally meets
+//   turb      free-stream turbulence (%) typical of where it operates
 import { THREE, mat, glass, box, cyl, sph, torus, extrude, planform, lathe, put, deco, tire, naca, fan, aim, loft, wing } from './kit.js';
 
 const G = () => new THREE.Group();
@@ -647,36 +648,36 @@ function skyline() {
 export const CATEGORIES = ['All', 'Vehicles', 'PC hardware', 'Food & fun', 'Shapes'];
 
 export const PRESETS = [
-  { id: 'f1', ref: 'Cd 0.7–1.1, Cl −2.5 to −3.5', name: 'F1 car', cat: 'Vehicles', desc: 'Open-wheel racer with front + rear wings and diffuser', real: 5.4, speed: 280, grounded: true, seed: 'inlet', build: f1Car },
-  { id: 'sedan', ref: 'Cd 0.24–0.32', name: 'Sedan', cat: 'Vehicles', desc: 'Three-box family car', real: 4.6, speed: 120, grounded: true, build: sedan },
-  { id: 'sports', name: 'Sports coupé', cat: 'Vehicles', desc: 'Low fastback with a rear wing and splitter', real: 4.5, speed: 200, grounded: true, ref: 'Cd 0.30–0.36', build: sportsCar },
-  { id: 'suv', name: 'SUV', cat: 'Vehicles', desc: 'Tall two-box body with a blunt tail', real: 4.7, speed: 110, grounded: true, ref: 'Cd 0.33–0.40', build: suv },
-  { id: 'pickup', ref: 'Cd 0.40–0.50', name: 'Pickup truck', cat: 'Vehicles', desc: 'Open bed makes a big recirculation bubble', real: 5.5, speed: 110, grounded: true, build: pickup },
-  { id: 'semi', ref: 'Cd 0.6–0.9', name: 'Semi truck', cat: 'Vehicles', desc: 'Cab-over tractor and box trailer', real: 13, speed: 90, grounded: true, build: semi },
-  { id: 'airliner', name: 'Airliner', cat: 'Vehicles', desc: 'Twin-engine jet in cruise', real: 37, speed: 320, grounded: false, pitch: 3, fit: [1.9, 0.9, 1.6], build: airliner },
-  { id: 'rocket', ref: 'Cd 0.3–0.5', name: 'Rocket', cat: 'Vehicles', desc: 'Ogive nose, four fins', real: 6, speed: 350, grounded: false, build: rocket },
-  { id: 'cyclist', ref: 'CdA 0.25–0.35 m²', name: 'Cyclist', cat: 'Vehicles', desc: 'Rider in the drops on a road bike', real: 1.75, speed: 45, grounded: true, fit: [1.2, 1.0, 0.8], build: cyclist },
+  { id: 'f1', temp: 28, ref: 'Cd 0.7–1.1, Cl −2.5 to −3.5', name: 'F1 car', cat: 'Vehicles', desc: 'Open-wheel racer with front + rear wings and diffuser', real: 5.4, speed: 280, grounded: true, seed: 'inlet', build: f1Car },
+  { id: 'sedan', turb: 3, ref: 'Cd 0.24–0.32', name: 'Sedan', cat: 'Vehicles', desc: 'Three-box family car', real: 4.6, speed: 120, grounded: true, build: sedan },
+  { id: 'sports', temp: 22, name: 'Sports coupé', cat: 'Vehicles', desc: 'Low fastback with a rear wing and splitter', real: 4.5, speed: 200, grounded: true, ref: 'Cd 0.30–0.36', build: sportsCar },
+  { id: 'suv', turb: 3, name: 'SUV', cat: 'Vehicles', desc: 'Tall two-box body with a blunt tail', real: 4.7, speed: 110, grounded: true, ref: 'Cd 0.33–0.40', build: suv },
+  { id: 'pickup', turb: 3, ref: 'Cd 0.40–0.50', name: 'Pickup truck', cat: 'Vehicles', desc: 'Open bed makes a big recirculation bubble', real: 5.5, speed: 110, grounded: true, build: pickup },
+  { id: 'semi', temp: 10, turb: 4, ref: 'Cd 0.6–0.9', name: 'Semi truck', cat: 'Vehicles', desc: 'Cab-over tractor and box trailer', real: 13, speed: 90, grounded: true, build: semi },
+  { id: 'airliner', temp: -54, alt: 10700, name: 'Airliner', cat: 'Vehicles', desc: 'Twin-engine jet in cruise', real: 37, speed: 320, grounded: false, pitch: 3, build: airliner },
+  { id: 'rocket', temp: -4, alt: 3000, ref: 'Cd 0.3–0.5', name: 'Rocket', cat: 'Vehicles', desc: 'Ogive nose, four fins', real: 6, speed: 350, grounded: false, build: rocket },
+  { id: 'cyclist', temp: 20, ref: 'CdA 0.25–0.35 m²', name: 'Cyclist', cat: 'Vehicles', desc: 'Rider in the drops on a road bike', real: 1.75, speed: 45, grounded: true, build: cyclist },
 
-  { id: 'pc-mesh', name: 'Mesh-front tower', cat: 'PC hardware', desc: 'Three intakes, rear + top exhaust. Free-breathing.', real: 0.5, speed: 0, grounded: true, seed: 'volume', fit: [1.4, 1.15, 0.9], fans: true, build: () => pcCase({ front: 'mesh' }) },
-  { id: 'pc-glass', name: 'Glass-front tower', cat: 'PC hardware', desc: 'Sealed front panel: intakes starve through side gaps', real: 0.5, speed: 0, grounded: true, seed: 'volume', fit: [1.4, 1.15, 0.9], fans: true, build: () => pcCase({ front: 'glass', color: '#f1f2f4', accent: '#ff5fd2' }) },
-  { id: 'pc-sff', name: 'Small form factor', cat: 'PC hardware', desc: 'Compact cube, one intake and one top exhaust', real: 0.33, speed: 0, grounded: true, seed: 'volume', fit: [1.3, 0.95, 0.9], fans: true, build: () => pcCase({ L: 0.34, H: 0.3, W: 0.2, frontFans: 1, topFans: 1, color: '#2a2f3a', accent: '#8cff8a' }) },
-  { id: 'pc-bench', name: 'Open test bench', cat: 'PC hardware', desc: 'No panels: tower cooler and vertical GPU', real: 0.4, speed: 0, grounded: true, seed: 'volume', fit: [1.3, 1.0, 1.1], fans: true, build: openBench },
-  { id: 'gpu', name: 'Graphics card', cat: 'PC hardware', desc: 'Triple-fan cooler blowing into the heatsink', real: 0.3, speed: 0, grounded: false, seed: 'volume', fit: [1.4, 0.9, 0.7], fans: true, build: gpuCard },
+  { id: 'pc-mesh', temp: 24, name: 'Mesh-front tower', cat: 'PC hardware', desc: 'Three intakes, rear + top exhaust. Free-breathing.', real: 0.5, speed: 0, grounded: true, seed: 'volume', fans: true, build: () => pcCase({ front: 'mesh' }) },
+  { id: 'pc-glass', temp: 24, name: 'Glass-front tower', cat: 'PC hardware', desc: 'Sealed front panel: intakes starve through side gaps', real: 0.5, speed: 0, grounded: true, seed: 'volume', fans: true, build: () => pcCase({ front: 'glass', color: '#f1f2f4', accent: '#ff5fd2' }) },
+  { id: 'pc-sff', temp: 24, name: 'Small form factor', cat: 'PC hardware', desc: 'Compact cube, one intake and one top exhaust', real: 0.33, speed: 0, grounded: true, seed: 'volume', fans: true, build: () => pcCase({ L: 0.34, H: 0.3, W: 0.2, frontFans: 1, topFans: 1, color: '#2a2f3a', accent: '#8cff8a' }) },
+  { id: 'pc-bench', temp: 24, name: 'Open test bench', cat: 'PC hardware', desc: 'No panels: tower cooler and vertical GPU', real: 0.4, speed: 0, grounded: true, seed: 'volume', fans: true, build: openBench },
+  { id: 'gpu', temp: 24, name: 'Graphics card', cat: 'PC hardware', desc: 'Triple-fan cooler blowing into the heatsink', real: 0.3, speed: 0, grounded: false, seed: 'volume', fans: true, build: gpuCard },
 
-  { id: 'sandwich', name: 'Sandwich', cat: 'Food & fun', desc: 'Club sandwich. Surprisingly bluff.', real: 0.14, speed: 30, grounded: false, pitch: -6, build: sandwich },
-  { id: 'burger', name: 'Burger', cat: 'Food & fun', desc: 'Sesame bun, single patty', real: 0.11, speed: 30, grounded: true, fit: [1.2, 0.8, 0.85], build: burger },
-  { id: 'donut', name: 'Donut', cat: 'Food & fun', desc: 'Air threads straight through the hole', real: 0.1, speed: 25, grounded: false, build: donut },
-  { id: 'mug', name: 'Coffee mug', cat: 'Food & fun', desc: 'Open cavity with a handle in the wake', real: 0.1, speed: 20, grounded: true, fit: [1.2, 0.9, 0.85], build: mug },
-  { id: 'duck', name: 'Rubber duck', cat: 'Food & fun', desc: 'The classic debugging companion', real: 0.09, speed: 20, grounded: true, fit: [1.2, 0.9, 0.85], build: duck },
-  { id: 'cow', name: 'Spherical cow', cat: 'Food & fun', desc: 'Assume a spherical cow in a wind tunnel', real: 2.2, speed: 40, grounded: true, fit: [1.2, 0.95, 0.85], build: sphericalCow },
+  { id: 'sandwich', temp: 20, name: 'Sandwich', cat: 'Food & fun', desc: 'Club sandwich. Surprisingly bluff.', real: 0.14, speed: 30, grounded: false, pitch: -6, build: sandwich },
+  { id: 'burger', temp: 20, name: 'Burger', cat: 'Food & fun', desc: 'Sesame bun, single patty', real: 0.11, speed: 30, grounded: true, build: burger },
+  { id: 'donut', temp: 20, name: 'Donut', cat: 'Food & fun', desc: 'Air threads straight through the hole', real: 0.1, speed: 25, grounded: false, build: donut },
+  { id: 'mug', temp: 20, name: 'Coffee mug', cat: 'Food & fun', desc: 'Open cavity with a handle in the wake', real: 0.1, speed: 20, grounded: true, build: mug },
+  { id: 'duck', temp: 20, name: 'Rubber duck', cat: 'Food & fun', desc: 'The classic debugging companion', real: 0.09, speed: 20, grounded: true, build: duck },
+  { id: 'cow', temp: 14, turb: 8, name: 'Spherical cow', cat: 'Food & fun', desc: 'Assume a spherical cow in a wind tunnel', real: 2.2, speed: 40, grounded: true, build: sphericalCow },
 
-  { id: 'sphere', ref: 'Cd 0.47 (0.1–0.2 above Re 3×10⁵)', name: 'Sphere', cat: 'Shapes', desc: 'The reference bluff body', real: 0.2, speed: 80, grounded: false, fit: [0.7, 0.7, 0.7], build: shape(() => sph(0.5, steel())) },
-  { id: 'golf', ref: 'Cd ≈ 0.25', name: 'Golf ball', cat: 'Shapes', desc: 'Dimpled sphere', real: 0.043, speed: 250, grounded: false, fit: [0.7, 0.7, 0.7], build: golfBall },
-  { id: 'cube', ref: 'Cd ≈ 1.05', name: 'Cube', cat: 'Shapes', desc: 'Sharp edges, fixed separation', real: 0.2, speed: 80, grounded: false, fit: [0.6, 0.6, 0.6], build: shape(() => box(1, 1, 1, steel())) },
-  { id: 'cylinder', ref: 'Cd 1.0–1.2, St ≈ 0.2', name: 'Cylinder', cat: 'Shapes', desc: 'Crossflow cylinder: von Kármán vortex street', real: 0.3, speed: 60, grounded: false, fit: [0.42, 0.42, 1.8], slice: true, build: shape(() => cyl(0.25, 2.2, steel(), 'z')) },
-  { id: 'airfoil', ref: 'section Cl ≈ 1.1 at 8°', name: 'Airfoil', cat: 'Shapes', desc: 'NACA 2412 wing section at 8° angle of attack', real: 1.5, speed: 200, grounded: false, pitch: 8, fit: [1.2, 0.6, 1.3], slice: true, build: shape(() => extrude(naca(1.5), 1.9, steel())) },
-  { id: 'plate', ref: 'Cd 1.17–1.28', name: 'Flat plate', cat: 'Shapes', desc: 'Plate normal to the flow: maximum drag', real: 0.5, speed: 80, grounded: false, fit: [0.6, 0.75, 0.75], build: shape(() => box(0.06, 1, 1, steel())) },
-  { id: 'teardrop', ref: 'Cd 0.04–0.09', name: 'Teardrop', cat: 'Shapes', desc: 'Streamlined body of revolution', real: 1.0, speed: 200, grounded: false, fit: [1.5, 0.6, 0.6],
+  { id: 'sphere', ref: 'Cd 0.47 (0.1–0.2 above Re 3×10⁵)', name: 'Sphere', cat: 'Shapes', desc: 'The reference bluff body', real: 0.2, speed: 80, grounded: false, build: shape(() => sph(0.5, steel())) },
+  { id: 'golf', temp: 22, ref: 'Cd ≈ 0.25', name: 'Golf ball', cat: 'Shapes', desc: 'Dimpled sphere', real: 0.043, speed: 250, grounded: false, build: golfBall },
+  { id: 'cube', ref: 'Cd ≈ 1.05', name: 'Cube', cat: 'Shapes', desc: 'Sharp edges, fixed separation', real: 0.2, speed: 80, grounded: false, build: shape(() => box(1, 1, 1, steel())) },
+  { id: 'cylinder', ref: 'Cd 1.0–1.2, St ≈ 0.2', name: 'Cylinder', cat: 'Shapes', desc: 'Crossflow cylinder: von Kármán vortex street', real: 0.3, speed: 60, grounded: false, slice: true, build: shape(() => cyl(0.25, 2.2, steel(), 'z')) },
+  { id: 'airfoil', ref: 'section Cl ≈ 1.1 at 8°', name: 'Airfoil', cat: 'Shapes', desc: 'NACA 2412 wing section at 8° angle of attack', real: 1.5, speed: 200, grounded: false, pitch: 8, slice: true, build: shape(() => extrude(naca(1.5), 1.9, steel())) },
+  { id: 'plate', ref: 'Cd 1.17–1.28', name: 'Flat plate', cat: 'Shapes', desc: 'Plate normal to the flow: maximum drag', real: 0.5, speed: 80, grounded: false, build: shape(() => box(0.06, 1, 1, steel())) },
+  { id: 'teardrop', ref: 'Cd 0.04–0.09', name: 'Teardrop', cat: 'Shapes', desc: 'Streamlined body of revolution', real: 1.0, speed: 200, grounded: false,
     build: shape(() => lathe(Array.from({ length: 33 }, (_, i) => { const x = i / 32; return [4.5 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4) * (i === 32 ? 0 : 1), x * 3]; }), steel())) },
-  { id: 'skyline', name: 'City block', cat: 'Shapes', desc: 'Urban canyon wind between towers', real: 180, speed: 60, grounded: true, fit: [1.5, 1.2, 1.1], build: skyline },
+  { id: 'skyline', temp: 12, turb: 12, name: 'City block', cat: 'Shapes', desc: 'Urban canyon wind between towers', real: 180, speed: 60, grounded: true, build: skyline },
 ];

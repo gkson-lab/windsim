@@ -1,5 +1,5 @@
 {
-  "name": "zephyr-wind-tunnel",
+  "name": "windsim",
   "version": "1.0.0",
   "private": true,
   "description": "Real-time 3D wind tunnel: lattice-Boltzmann airflow around PC cases, cars, sandwiches and your own 3D models.",
@@ -11,6 +11,8 @@
     "test": "node test/kernel.test.js"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import { Slice } from './viz/slice.js';
 import { VoxelView } from './viz/voxels.js';
 import { lutCss } from './viz/colormaps.js';
 import { loadModelFiles, ACCEPT } from './loaders.js';
+import './style.css';
 
 const $ = (id) => document.getElementById(id);
 const FAN_G0 = 0.0012; // lattice body force of a fan at 100 %
@@ -16,7 +17,7 @@ const FAN_U0 = 0.026; // free-air face speed that force produces (lattice units)
 const FAN_FREE_MS = 2.5; // ...which stands for a typical 120 mm case fan (≈ 60 CFM)
 const U_LATTICE = 0.06; // free-stream speed in lattice units
 const NU_MIN = 0.001; // lowest stable lattice viscosity (LES handles the rest)
-const DEFAULT_FIT = [1.55, 0.85, 0.85];
+const TUNNEL_LENGTH = 4.2; // world units: every test section is drawn this long
 
 const state = {
   preset: null,
@@ -25,7 +26,6 @@ const state = {
   yaw: 0,
   pitch: 0,
   roll: 0,
-  scale: 1,
   grounded: true,
   real: 1,
   body: 'solid',
@@ -35,7 +35,8 @@ const state = {
   slice: 'off',
   axis: 'z',
   slicePos: 0.5,
-  ny: 48,
+  budget: 220000, // target number of lattice cells
+  room: 1, // clearance around the subject, relative to the default fit
   running: true,
   temp: 15, // °C
   altitude: 0, // m
@@ -54,8 +55,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#06080c');
-scene.fog = new THREE.Fog('#06080c', 9, 22);
+scene.background = new THREE.Color('#0f1011');
+scene.fog = new THREE.Fog('#0f1011', 10, 26);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.55;
@@ -74,11 +75,11 @@ const sun = new THREE.DirectionalLight('#ffffff', 2.4);
 sun.position.set(-2.5, 6, 3.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: 0.5, far: 14 });
+Object.assign(sun.shadow.camera, { left: -3.4, right: 3.4, top: 3.4, bottom: -3.4, near: 0.5, far: 16 });
 sun.shadow.bias = -0.0004;
 sun.shadow.radius = 4;
 scene.add(sun, new THREE.HemisphereLight('#bcd7ff', '#0b0d12', 0.55));
-const rim = new THREE.DirectionalLight('#45dcff', 0.7);
+const rim = new THREE.DirectionalLight('#cfd8e3', 0.6);
 rim.position.set(4, 1.2, -4);
 scene.add(rim);
 
@@ -103,12 +104,67 @@ let gen = 0;
 let solid = { area: 0, length: 0 };
 let hasFans = false;
 
-function makeGrid(ny) {
-  const nz = ny;
-  const nx = ny * 2;
-  const h = 2 / (ny - 2);
-  const size = new THREE.Vector3((nx - 2) * h, 2, (nz - 2) * h);
-  return { nx, ny, nz, h, size, origin: new THREE.Vector3(-size.x / 2 - h, -h, -size.z / 2 - h) };
+/**
+ * Size the test section around the subject as it is currently oriented.
+ * Returned sizes are in model units; makeGrid() scales them to the world.
+ */
+function fitTunnel() {
+  const d2r = Math.PI / 180;
+  rotator.rotation.set(state.roll * d2r, state.yaw * d2r, -state.pitch * d2r);
+  rotator.scale.setScalar(1);
+  objectRoot.position.set(0, 0, 0);
+  objectRoot.updateMatrixWorld(true);
+  const s = new THREE.Box3().setFromObject(objectRoot, true).getSize(new THREE.Vector3());
+  const L = Math.max(s.x, s.y, s.z, 1e-6);
+  const cross = Math.max(s.y, s.z);
+  const room = state.room;
+  const up = Math.max(0.7 * L, 1.2 * cross) * room;
+  const down = Math.max(1.5 * L, 3 * cross) * room;
+  const mz = Math.max(0.6 * s.z, 0.25 * L) * room;
+  const my = Math.max((state.grounded ? 1.0 : 0.7) * s.y, 0.25 * L) * room;
+  return { up, unit: new THREE.Vector3(up + s.x + down, s.y + (state.grounded ? my : 2 * my), s.z + 2 * mz), grounded: state.grounded };
+}
+
+function makeGrid(spec, budget) {
+  const worldScale = TUNNEL_LENGTH / spec.unit.x;
+  const want = spec.unit.clone().multiplyScalar(worldScale);
+  const h = Math.cbrt((want.x * want.y * want.z) / budget);
+  const cells = (len) => Math.max(14, Math.round(len / h)) + 2;
+  const nx = cells(want.x), ny = cells(want.y), nz = cells(want.z);
+  const size = new THREE.Vector3((nx - 2) * h, (ny - 2) * h, (nz - 2) * h);
+  return {
+    nx, ny, nz, h, size, worldScale, budget, unit: spec.unit, grounded: spec.grounded,
+    upstream: spec.up * worldScale,
+    origin: new THREE.Vector3(-size.x / 2 - h, -h, -size.z / 2 - h),
+  };
+}
+
+/** Rebuild the tunnel when the subject no longer fits the current one well. Returns true if rebuilt. */
+function ensureGrid(force) {
+  const spec = fitTunnel();
+  if (grid && !force && grid.budget === state.budget && grid.grounded === spec.grounded) {
+    const fits = ['x', 'y', 'z'].every((k) => {
+      const r = spec.unit[k] / grid.unit[k];
+      return r > 0.88 && r < 1.14;
+    });
+    if (fits) return false;
+  }
+  setGrid(makeGrid(spec, state.budget));
+  return true;
+}
+
+function fitCamera() {
+  const { size } = grid;
+  const target = new THREE.Vector3(-size.x * 0.08, size.y * 0.42, 0);
+  // Frame the box as seen from the default three-quarter view.
+  const aspect = camera.aspect || 1.6;
+  const t = Math.tan((camera.fov * Math.PI) / 360);
+  const halfW = 0.5 * (size.x * 0.85 + size.z * 0.62);
+  const halfH = 0.5 * (size.y * 0.95 + size.z * 0.35 + size.x * 0.18);
+  const dist = Math.max(halfW / (t * aspect), halfH / t) * 1.18;
+  controls.target.copy(target);
+  camera.position.copy(target).add(new THREE.Vector3(-0.5, 0.36, 0.78).normalize().multiplyScalar(dist));
+  controls.maxDistance = dist * 3;
 }
 
 function buildTunnel() {
@@ -120,13 +176,13 @@ function buildTunnel() {
   const { size } = grid;
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(size.x, size.z),
-    new THREE.MeshStandardMaterial({ color: '#0a0d13', roughness: 0.82, metalness: 0.1 }),
+    new THREE.MeshStandardMaterial({ color: '#17181a', roughness: 0.9, metalness: 0 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   tunnel.add(floor);
 
-  const apron = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshBasicMaterial({ color: '#05070a' }));
+  const apron = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshBasicMaterial({ color: '#0c0d0e' }));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.004;
   tunnel.add(apron);
@@ -138,14 +194,14 @@ function buildTunnel() {
   for (let z = -size.z / 2; z <= size.z / 2 + 1e-6; z += step) pts.push(-size.x / 2, 0.002, z, size.x / 2, 0.002, z);
   const lines = new THREE.LineSegments(
     new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)),
-    new THREE.LineBasicMaterial({ color: '#8fb4d9', transparent: true, opacity: 0.07 }),
+    new THREE.LineBasicMaterial({ color: '#e6e4df', transparent: true, opacity: 0.06 }),
   );
   tunnel.add(lines);
 
   // Test-section frame.
   const frame = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x, size.y, size.z)),
-    new THREE.LineBasicMaterial({ color: '#45dcff', transparent: true, opacity: 0.22 }),
+    new THREE.LineBasicMaterial({ color: '#e6e4df', transparent: true, opacity: 0.28 }),
   );
   frame.position.y = size.y / 2;
   tunnel.add(frame);
@@ -161,7 +217,7 @@ function buildTunnel() {
   tunnel.add(
     new THREE.LineSegments(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(hc, 3)),
-      new THREE.LineBasicMaterial({ color: '#45dcff', transparent: true, opacity: 0.09 }),
+      new THREE.LineBasicMaterial({ color: '#e6e4df', transparent: true, opacity: 0.07 }),
     ),
   );
 
@@ -174,7 +230,7 @@ function buildTunnel() {
   tunnel.add(
     new THREE.LineSegments(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(chev, 3)),
-      new THREE.LineBasicMaterial({ color: '#45dcff', transparent: true, opacity: 0.55 }),
+      new THREE.LineBasicMaterial({ color: '#e8a33d', transparent: true, opacity: 0.8 }),
     ),
   );
 }
@@ -186,15 +242,17 @@ const smooth = { cd: null, cl: null, cs: null, sps: 0 };
 const history = { cd: [], cl: [] };
 let lastHistory = 0;
 
-function setGrid(ny) {
-  state.ny = ny;
-  grid = makeGrid(ny);
+function setGrid(g) {
+  grid = g;
   field = new Field(grid);
   gen++;
   worker.postMessage({ type: 'init', gen, nx: grid.nx, ny: grid.ny, nz: grid.nz });
   buildTunnel();
+  fitCamera();
   const cells = grid.nx * grid.ny * grid.nz;
-  $('gridNote').textContent = `${grid.nx} × ${grid.ny} × ${grid.nz} lattice · ${(cells / 1000).toFixed(0)}k cells · D3Q19 LBM + LES`;
+  const m = metresPerWorld();
+  const dim = (v) => (v * m >= 10 ? (v * m).toFixed(0) : v * m >= 1 ? (v * m).toFixed(1) : (v * m).toFixed(2));
+  $('gridNote').textContent = `${grid.nx} × ${grid.ny} × ${grid.nz} cells (${(cells / 1000).toFixed(0)}k). Test section ${dim(grid.size.x)} × ${dim(grid.size.y)} × ${dim(grid.size.z)} m, fitted to the subject.`;
 }
 
 /** Air properties from temperature and altitude (ISA pressure, Sutherland viscosity). */
@@ -218,7 +276,7 @@ function velScale() {
 }
 
 function metresPerWorld() {
-  return state.real / Math.max(1e-6, model.maxDim * model.baseScale * state.scale);
+  return state.real / Math.max(1e-6, model.maxDim * (grid?.worldScale ?? 1));
 }
 
 function flowParams() {
@@ -293,6 +351,8 @@ function updateStaticData() {
   $('dArea').textContent = area >= 0.01 ? `${fmt(area)} m²` : `${fmt(area * 1e4, 1)} cm²`;
   $('dBlock').textContent = `${((solid.area / ((grid.ny - 2) * (grid.nz - 2))) * 100).toFixed(1)} %`;
   $('dRho').textContent = `${A.rho.toFixed(3)} kg/m³`;
+  $('sRho').textContent = A.rho.toFixed(3);
+  $('uRho').textContent = `kg/m³ · ${Math.round((A.rho / 1.225) * 100)}% of sea level`;
   $('dNu').textContent = `${(A.nu * 1e5).toFixed(2)}×10⁻⁵ m²/s`;
   $('dRef').textContent = state.preset?.ref ?? '—';
   $('machWarn').hidden = !(v / A.a > 0.3);
@@ -469,7 +529,7 @@ function exportCsv() {
   const A = air();
   const p = flowParams();
   const head = [
-    `# Zephyr wind tunnel export`,
+    `# windsim export`,
     `# subject,${state.preset?.name ?? ''}`,
     `# wind_speed_kmh,${state.speed}`,
     `# real_size_m,${state.real}`,
@@ -491,7 +551,7 @@ function exportCsv() {
   const blob = new Blob([[...head, ...rows].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `zephyr-${state.preset?.id ?? 'run'}.csv`;
+  a.download = `windsim-${state.preset?.id ?? 'run'}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   toast(rows.length ? `Exported ${rows.length} samples` : 'Exported setup only: no force samples yet');
@@ -533,7 +593,7 @@ function drawSpark() {
   ctx.lineTo(W, y(0));
   ctx.stroke();
   ctx.setLineDash([]);
-  for (const [arr, col] of [[history.cl, '#ff8a4c'], [history.cd, '#45dcff']]) {
+  for (const [arr, col] of [[history.cl, '#7fb0c8'], [history.cd, '#e8a33d']]) {
     ctx.strokeStyle = col;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
@@ -578,9 +638,7 @@ function setSubject(preset) {
   const size = box.getSize(new THREE.Vector3());
   box.getCenter(model.center);
   obj.position.copy(model.center).negate();
-  const fit = preset.fit ?? DEFAULT_FIT;
   model.maxDim = Math.max(size.x, size.y, size.z) || 1;
-  model.baseScale = Math.min(fit[0] / (size.x || 1e-6), fit[1] / (size.y || 1e-6), fit[2] / (size.z || 1e-6));
   model.spinners = [];
   obj.traverse((o) => o.userData.spin && model.spinners.push(o));
   rotator.add(obj);
@@ -590,16 +648,21 @@ function setSubject(preset) {
     yaw: 0,
     pitch: preset.pitch ?? 0,
     roll: 0,
-    scale: 1,
+    room: 1,
+    temp: preset.temp ?? 15,
+    altitude: preset.alt ?? 0,
+    turbulence: preset.turb ?? 0,
+    ground: 'belt',
     grounded: !!preset.grounded,
     real: preset.real ?? 1,
     seed: preset.seed ?? 'inlet',
     fan: 1,
   });
   state.slice = preset.slice ? 'speed' : 'off';
+  ensureGrid(true);
   applyBodyMode();
   syncUi();
-  rebuildSubject(true);
+  rebuildSubject(true, false);
   smooth.cd = smooth.cl = smooth.cs = null;
   history.cd.length = history.cl.length = 0;
   log.length = clTrace.length = 0;
@@ -611,17 +674,23 @@ function setSubject(preset) {
 
 function layoutSubject() {
   const d2r = Math.PI / 180;
+  const { size } = grid;
   rotator.rotation.set(state.roll * d2r, state.yaw * d2r, -state.pitch * d2r);
-  rotator.scale.setScalar(model.baseScale * state.scale);
-  objectRoot.position.set(-grid.size.x / 2 + grid.size.x * 0.33, 0, 0);
+  rotator.scale.setScalar(grid.worldScale);
+  objectRoot.position.set(0, 0, 0);
   objectRoot.updateMatrixWorld(true);
   const box = model.bbox.setFromObject(objectRoot, true);
-  objectRoot.position.y = state.grounded ? -box.min.y : 1 - (box.min.y + box.max.y) / 2;
+  objectRoot.position.set(
+    -size.x / 2 + grid.upstream - box.min.x,
+    state.grounded ? -box.min.y : size.y / 2 - (box.min.y + box.max.y) / 2,
+    -(box.min.z + box.max.z) / 2,
+  );
   objectRoot.updateMatrixWorld(true);
   box.setFromObject(objectRoot, true);
 }
 
-function rebuildSubject(reset = false) {
+function rebuildSubject(reset = false, refit = reset) {
+  if (ensureGrid(refit)) reset = true;
   layoutSubject();
   const res = voxelize(objectRoot, grid);
   field.flag = res.flag;
@@ -635,6 +704,7 @@ function rebuildSubject(reset = false) {
   if (state.body === 'voxels') voxelView.rebuild(field);
   voxelDirty = state.body !== 'voxels';
   updateSeedBounds();
+  if (reset) applySlice();
 }
 
 let voxelDirty = true;
@@ -663,7 +733,17 @@ function updateSeedBounds() {
     new THREE.Vector3(Math.max(-size.x / 2 + eps, b.min.x - 0.45), Math.max(eps, b.min.y - 0.15), Math.max(-size.z / 2 + eps, b.min.z - 0.35)),
     new THREE.Vector3(Math.min(size.x / 2 - eps, b.max.x + 0.9), Math.min(size.y - eps, b.max.y + 0.5), Math.min(size.z / 2 - eps, b.max.z + 0.35)),
   );
+  seedArea = (inlet.y1 - inlet.y0) * (inlet.z1 - inlet.z0);
+  applyCount();
   streaks.setBounds(inlet, volume);
+}
+
+// Smoke density follows the subject: the slider sets lines per unit of seeded
+// cross-section, so a slim car and a broad truck look equally well covered.
+let seedArea = 1.2;
+function applyCount() {
+  const n = state.count * THREE.MathUtils.clamp(seedArea / 1.2, 0.3, 1.8);
+  streaks.setCount(Math.round(THREE.MathUtils.clamp(n, 500, 24000)));
 }
 
 function applyBodyMode() {
@@ -729,8 +809,8 @@ const ui = {
   yaw: bindRange('yaw', 'oYaw', (v) => `${v}°`, (v) => { state.yaw = v; scheduleRebuild(); }),
   pitch: bindRange('pitch', 'oPitch', (v) => `${v}°`, (v) => { state.pitch = v; scheduleRebuild(); }),
   roll: bindRange('roll', 'oRoll', (v) => `${v}°`, (v) => { state.roll = v; scheduleRebuild(); }),
-  scale: bindRange('scale', 'oScale', (v) => `${v}%`, (v) => { state.scale = v / 100; scheduleRebuild(); }),
-  count: bindRange('count', 'oCount', (v) => `${(v / 1000).toFixed(1)}k`, (v) => { state.count = v; streaks.setCount(v); applySmokeOpacity(); }),
+  room: bindRange('room', 'oRoom', (v) => `${v}%`, (v) => { state.room = v / 100; scheduleRebuild(); }),
+  count: bindRange('count', 'oCount', (v) => `${(v / 1000).toFixed(1)}k`, (v) => { state.count = v; applyCount(); applySmokeOpacity(); }),
   slicePos: bindRange('slicePos', 'oSlicePos', (v) => `${v}%`, (v) => { state.slicePos = v / 100; applySlice(); }),
   body: bindSeg('segBody', (v) => { state.body = v; applyBodyMode(); }),
   seed: bindSeg('segSeed', (v) => { state.seed = v; applySeed(); }),
@@ -738,9 +818,8 @@ const ui = {
   slice: bindSeg('segSlice', (v) => { state.slice = v; applySlice(); }),
   axis: bindSeg('segAxis', (v) => { state.axis = v; applySlice(); }),
   quality: bindSeg('segQuality', (v) => {
-    setGrid(+v);
+    state.budget = +v * 1000;
     rebuildSubject(true);
-    applySlice();
   }),
 };
 
@@ -792,7 +871,7 @@ function syncUi() {
   ui.yaw.set(state.yaw);
   ui.pitch.set(state.pitch);
   ui.roll.set(state.roll);
-  ui.scale.set(Math.round(state.scale * 100));
+  ui.room.set(Math.round(state.room * 100));
   ui.count.set(state.count);
   ui.slicePos.set(Math.round(state.slicePos * 100));
   ui.seed.set(state.seed);
@@ -899,14 +978,14 @@ let thumbKit = null;
 function renderThumb(preset) {
   if (!thumbKit) {
     const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    r.setSize(240, 165);
+    r.setSize(240, 152);
     r.toneMapping = THREE.ACESFilmicToneMapping;
     const s = new THREE.Scene();
     s.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
     const key = new THREE.DirectionalLight('#fff', 2.2);
     key.position.set(-2, 4, 3);
     s.add(key);
-    thumbKit = { r, s, cam: new THREE.PerspectiveCamera(30, 240 / 165, 0.01, 1000) };
+    thumbKit = { r, s, cam: new THREE.PerspectiveCamera(30, 240 / 152, 0.01, 1000) };
   }
   const { r, s, cam } = thumbKit;
   const obj = preset.build();
@@ -1017,7 +1096,6 @@ window.addEventListener('drop', (e) => {
 /* top bar */
 function setRunning(run) {
   state.running = run;
-  $('playIcon').textContent = run ? '❚❚' : '▶';
   $('playLabel').textContent = run ? 'Pause' : 'Resume';
   pushParams();
 }
@@ -1037,7 +1115,7 @@ $('btnShot').onclick = () => {
   canvas.toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `zephyr-${state.preset?.id ?? 'tunnel'}.png`;
+    a.download = `windsim-${state.preset?.id ?? 'tunnel'}.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
@@ -1069,7 +1147,8 @@ const probeEl = $('probe');
 const probeOut = new Float32Array(4);
 canvas.addEventListener('pointermove', (e) => {
   if (!slice.object.visible || !field?.ready || e.buttons) return (probeEl.hidden = true);
-  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  const r = canvas.getBoundingClientRect();
+  pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObject(slice.object)[0];
   if (!hit || !field.sample(hit.point.x, hit.point.y, hit.point.z, probeOut)) return (probeEl.hidden = true);
@@ -1086,7 +1165,7 @@ canvas.addEventListener('pointermove', (e) => {
     `position  ${fmt((hit.point.x - objectRoot.position.x) * mpw)}, ${fmt(hit.point.y * mpw)}, ${fmt(hit.point.z * mpw)} m`,
   ];
   probeEl.textContent = lines.join('\n');
-  probeEl.style.left = `${Math.min(e.clientX, window.innerWidth - 330)}px`;
+  probeEl.style.left = `${Math.min(e.clientX, window.innerWidth - 340)}px`;
   probeEl.style.top = `${Math.min(e.clientY, window.innerHeight - 110)}px`;
   probeEl.hidden = false;
 });
@@ -1094,16 +1173,25 @@ canvas.addEventListener('pointerleave', () => (probeEl.hidden = true));
 
 /* ───────────────────────────── frame loop ───────────────────────────── */
 
+const stage = $('stage');
 function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const w = stage.clientWidth || window.innerWidth;
+  const h = stage.clientHeight || window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  // Pull back on narrow / portrait screens so the whole test section stays in view.
+  // Wider lens on narrow / portrait screens so the whole test section stays in view.
   camera.fov = w / h < 1 ? 58 : 38;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', resize);
+let fitted = false;
+new ResizeObserver(() => {
+  resize();
+  // First real layout: frame the tunnel for the actual viewport shape.
+  if (!fitted && grid && stage.clientWidth) {
+    fitted = true;
+    fitCamera();
+  }
+}).observe(stage);
 
 const clock = new THREE.Clock();
 function frame() {
@@ -1120,7 +1208,6 @@ function frame() {
 
 /* ───────────────────────────── boot ───────────────────────────── */
 
-setGrid(state.ny);
 resize();
 renderChips();
 const initial = PRESETS.find((p) => p.id === new URLSearchParams(location.search).get('preset')) ?? PRESETS[0];

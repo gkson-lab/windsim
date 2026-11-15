@@ -3,51 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="Real-time 3D wind tunnel. Simulate airflow around PC cases, cars, sandwiches and your own 3D models." />
-    <meta name="theme-color" content="#06080c" />
-    <title>Zephyr — 3D Wind Tunnel</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2306080c'/><path d='M5 11h14a4 4 0 1 0-4-4M5 16h20a4 4 0 1 1-4 4M5 21h9a3 3 0 1 1-3 3' fill='none' stroke='%2345dcff' stroke-width='2.2' stroke-linecap='round'/></svg>" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <meta name="description" content="3D wind tunnel in the browser. Airflow around PC cases, cars, food and your own 3D models." />
+    <meta name="theme-color" content="#0f1011" />
+    <title>windsim — 3D wind tunnel</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230f1011'/><path d='M5 11h22M5 16h15M5 21h19' stroke='%23e8a33d' stroke-width='2.5'/></svg>" />
   </head>
   <body>
-    <canvas id="view" aria-label="3D wind tunnel view"></canvas>
-
-    <header class="topbar glass">
-      <div class="brand">
-        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M4 11h15a4 4 0 1 0-4-4M4 16h21a4 4 0 1 1-4 4M4 21h10a3 3 0 1 1-3 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
-        <div>
-          <strong>Zephyr</strong>
-          <span>3D wind tunnel</span>
+    <div class="app">
+      <header class="bar">
+        <span class="brand">windsim</span>
+        <div class="subject">
+          <span id="subjectName">—</span>
+          <small id="subjectDesc"></small>
         </div>
-      </div>
-      <div class="subject">
-        <span id="subjectName">—</span>
-        <small id="subjectDesc"></small>
-      </div>
-      <div class="actions">
-        <button id="btnPanels" class="btn icon only-mobile" title="Presets" aria-label="Toggle presets">☰</button>
-        <button id="btnPlay" class="btn" title="Pause / resume (Space)"><span id="playIcon">❚❚</span><span class="lbl" id="playLabel">Pause</span></button>
-        <button id="btnReset" class="btn" title="Restart the flow (R)">↺<span class="lbl">Reset flow</span></button>
-        <button id="btnShot" class="btn" title="Save a screenshot">⤓<span class="lbl">Snapshot</span></button>
-        <button id="btnControls" class="btn icon only-mobile" title="Controls" aria-label="Toggle controls">⚙</button>
-      </div>
-    </header>
+        <div class="actions">
+          <button id="btnPanels" class="btn only-mobile">Subjects</button>
+          <button id="btnControls" class="btn only-mobile">Controls</button>
+          <button id="btnPlay" class="btn" title="Space"><span id="playLabel">Pause</span></button>
+          <button id="btnReset" class="btn" title="R">Restart flow</button>
+          <button id="btnShot" class="btn hide-mobile">Save image</button>
+        </div>
+      </header>
 
-    <aside class="panel left glass" id="panelLeft">
-      <div class="panel-head">
-        <h2>Test subjects</h2>
-        <input id="search" type="search" placeholder="Search…" aria-label="Search presets" />
-      </div>
-      <div class="chips" id="chips"></div>
-      <div class="gallery" id="gallery"></div>
-      <label class="drop" id="drop">
-        <input id="file" type="file" multiple hidden />
-        <strong>Import your own 3D model</strong>
-        <span>Drop a file anywhere or click to browse<br />GLB · glTF · OBJ · STL · PLY · FBX</span>
-      </label>
-    </aside>
+      <aside class="side left" id="panelLeft">
+        <div class="side-head">
+          <h2>Test subjects</h2>
+          <input id="search" type="search" placeholder="Search" aria-label="Search presets" />
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="gallery" id="gallery"></div>
+        <label class="drop" id="drop">
+          <input id="file" type="file" multiple hidden />
+          <strong>Import a 3D model</strong>
+          <span>Drop a file anywhere, or click to choose. GLB, glTF, OBJ, STL, PLY, FBX.</span>
+        </label>
+      </aside>
 
-    <aside class="panel right glass" id="panelRight">
+      <main class="stage" id="stage">
+        <canvas id="view" aria-label="3D wind tunnel view"></canvas>
+        <div class="legend" id="legend">
+          <span id="legendTitle">Speed</span>
+          <div class="scale" id="legendBar"></div>
+          <div class="ticks"><span id="legendMin"></span><span id="legendMid"></span><span id="legendMax"></span></div>
+        </div>
+      </main>
+
+      <footer class="hud" id="hud">
+        <div class="stat"><label>Drag coefficient</label><b id="sCd">—</b><small>Cd</small></div>
+        <div class="stat"><label>Lift coefficient</label><b id="sCl">—</b><small>Cl</small></div>
+        <div class="stat"><label>Drag</label><b id="sDrag">—</b><small id="uDrag">N</small></div>
+        <div class="stat"><label id="lLiftF">Lift</label><b id="sLift">—</b><small id="uLift">N</small></div>
+        <div class="stat"><label>Drag power</label><b id="sPower">—</b><small id="uPower">W</small></div>
+        <div class="stat"><label>Air density</label><b id="sRho">—</b><small id="uRho">kg/m³</small></div>
+        <div class="stat"><label>Reynolds number</label><b id="sRe">—</b><small id="sReSim"></small></div>
+        <div class="stat wide">
+          <label>Force history <i class="k cd"></i>Cd <i class="k cl"></i>Cl</label>
+          <canvas id="spark" width="360" height="72"></canvas>
+        </div>
+      </footer>
+
+      <aside class="side right" id="panelRight">
       <section>
         <h2>Flow</h2>
         <label class="row"><span>Wind speed</span><output id="oSpeed"></output>
@@ -55,9 +70,9 @@
         <label class="row" id="fanRow"><span>Fan power</span><output id="oFan"></output>
           <input id="fan" type="range" min="0" max="150" step="1" value="100" /></label>
         <label class="row"><span>Air temperature</span><output id="oTemp"></output>
-          <input id="temp" type="range" min="-30" max="50" step="1" value="15" /></label>
+          <input id="temp" type="range" min="-60" max="50" step="1" value="15" /></label>
         <label class="row"><span>Altitude</span><output id="oAlt"></output>
-          <input id="altitude" type="range" min="0" max="5000" step="50" value="0" /></label>
+          <input id="altitude" type="range" min="0" max="12000" step="100" value="0" /></label>
         <label class="row"><span>Inlet turbulence</span><output id="oTurb"></output>
           <input id="turbulence" type="range" min="0" max="20" step="1" value="0" /></label>
         <div class="seg" id="segGround" role="group" aria-label="Ground">
@@ -74,8 +89,8 @@
           <input id="pitch" type="range" min="-90" max="90" step="1" value="0" /></label>
         <label class="row"><span>Roll</span><output id="oRoll"></output>
           <input id="roll" type="range" min="-180" max="180" step="1" value="0" /></label>
-        <label class="row"><span>Scale</span><output id="oScale"></output>
-          <input id="scale" type="range" min="40" max="140" step="1" value="100" /></label>
+        <label class="row"><span>Room around subject</span><output id="oRoom"></output>
+          <input id="room" type="range" min="60" max="200" step="5" value="100" /></label>
         <label class="row inline"><span>Real size <em>(longest side, m)</em></span>
           <input id="real" type="number" min="0.001" step="any" inputmode="decimal" /></label>
         <div class="seg" id="segBody" role="group" aria-label="Body display">
@@ -92,7 +107,7 @@
         <label class="row"><span>Density</span><output id="oCount"></output>
           <input id="count" type="range" min="1000" max="24000" step="500" value="6000" /></label>
         <div class="seg" id="segColor" role="group" aria-label="Smoke colour">
-          <button data-v="speed" class="on">Colour by speed</button><button data-v="pressure">by pressure</button>
+          <button data-v="speed" class="on">Colour by speed</button><button data-v="pressure">Colour by pressure</button>
         </div>
       </section>
 
@@ -131,40 +146,22 @@
           <dt>Fan airflow <em id="dFanN"></em></dt><dd id="dFan">—</dd>
           <dt>Versus unobstructed</dt><dd id="dFanEff">—</dd>
         </dl>
-        <button class="btn wide" id="btnCsv">⤓ Export force history (CSV)</button>
+        <button class="btn wide" id="btnCsv">Export force history (CSV)</button>
         <p class="note">Hover the cut plane to probe local speed and pressure.</p>
       </section>
 
       <section>
         <h2>Solver</h2>
         <div class="seg" id="segQuality" role="group" aria-label="Grid resolution">
-          <button data-v="32">Draft</button><button data-v="48" class="on">Standard</button><button data-v="64">Fine</button><button data-v="80">Ultra</button>
+          <button data-v="65">Draft</button><button data-v="220" class="on">Standard</button><button data-v="520">Fine</button><button data-v="1000">Ultra</button>
         </div>
+        <dl class="data"><dt>Solver speed</dt><dd><span id="sSps">—</span> steps/s</dd></dl>
         <p class="note" id="gridNote"></p>
       </section>
     </aside>
-
-    <footer class="hud glass" id="hud">
-      <div class="stat"><label>Drag coefficient</label><b id="sCd">—</b><small>C<sub>d</sub></small></div>
-      <div class="stat"><label id="lLift">Lift coefficient</label><b id="sCl">—</b><small>C<sub>l</sub></small></div>
-      <div class="stat"><label>Drag force</label><b id="sDrag">—</b><small id="uDrag">N</small></div>
-      <div class="stat"><label id="lLiftF">Lift</label><b id="sLift">—</b><small id="uLift">N</small></div>
-      <div class="stat"><label>Drag power</label><b id="sPower">—</b><small id="uPower">W</small></div>
-      <div class="stat"><label>Reynolds number</label><b id="sRe">—</b><small id="sReSim"></small></div>
-      <div class="stat wide">
-        <label>Force history <i class="k cd"></i>C<sub>d</sub> <i class="k cl"></i>C<sub>l</sub></label>
-        <canvas id="spark" width="360" height="72"></canvas>
-      </div>
-      <div class="stat"><label>Solver</label><b id="sSps">—</b><small>steps / s</small></div>
-    </footer>
-
-    <div class="legend glass" id="legend">
-      <span id="legendTitle">Speed</span>
-      <div class="bar" id="legendBar"></div>
-      <div class="ticks"><span id="legendMin"></span><span id="legendMid"></span><span id="legendMax"></span></div>
     </div>
 
-    <div class="probe glass" id="probe" hidden></div>
+    <div class="probe" id="probe" hidden></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div class="dropveil" id="dropveil"><div>Drop to load into the tunnel</div></div>
 
